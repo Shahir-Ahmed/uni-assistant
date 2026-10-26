@@ -84,7 +84,11 @@ const updatedAsg = academicService.updateAssignment(
   'CR announced 5-day extension'
 )
 
-assert(new Date(updatedAsg!.deadline!).getTime() === updatedDeadline.getTime(), 'Deadline successfully updated')
+assert(
+updatedAsg?.deadline != null &&
+new Date(updatedAsg.deadline).getTime() === updatedDeadline.getTime(),
+'Deadline successfully updated'
+)
 assert(updatedAsg?.history && updatedAsg.history.length > 0, 'Assignment history logged')
 const historyEntry = updatedAsg?.history?.[0]
 assert(historyEntry?.field === 'DEADLINE', 'History records DEADLINE modification')
