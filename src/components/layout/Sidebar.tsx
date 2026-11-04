@@ -32,13 +32,15 @@ export function Sidebar({ onQuickCapture }: SidebarProps) {
   const [unprocessedInboxCount, setUnprocessedInboxCount] = React.useState(0)
 
   React.useEffect(() => {
-    try {
-      const assignments = academicService.getAssignments()
-      const pending = assignments.filter((a) => !['COMPLETED', 'SUBMITTED', 'CANCELLED'].includes(a.status)).length
-      setPendingAssignmentsCount(pending)
-    } catch (e) {
-      // ignore
-    }
+    academicService
+      .getAssignments()
+      .then((assignments) => {
+        const pending = assignments.filter((a) => !['COMPLETED', 'SUBMITTED', 'CANCELLED'].includes(a.status)).length
+        setPendingAssignmentsCount(pending)
+      })
+      .catch(() => {
+        // ignore
+      })
   }, [pathname])
 
   const navItems = [

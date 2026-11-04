@@ -22,7 +22,15 @@ export default function InboxPage() {
   const [announcements, setAnnouncements] = React.useState<Announcement[]>([])
 
   React.useEffect(() => {
-    setAnnouncements(academicService.getAnnouncements())
+    async function load() {
+      try {
+        const data = await academicService.getAnnouncements()
+        setAnnouncements(data)
+      } catch (err) {
+        console.error('Failed to load announcements:', err)
+      }
+    }
+    load()
   }, [])
 
   return (

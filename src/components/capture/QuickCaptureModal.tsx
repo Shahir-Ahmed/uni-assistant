@@ -49,25 +49,27 @@ export function QuickCaptureModal({ open, onOpenChange, onSuccess }: QuickCaptur
 
   React.useEffect(() => {
     if (open) {
-      setSubjects(academicService.getSubjects())
+      academicService.getSubjects().then((subs) => setSubjects(subs)).catch(console.error)
       setStep("INPUT")
       setRawText("")
     }
   }, [open])
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     if (!rawText.trim()) return
     setIsAnalyzing(true)
 
-    // Simulate instant heuristic extraction
-    setTimeout(() => {
-      const parsed = academicService.parseAcademicText(rawText)
+    try {
+      const subs = subjects.length > 0 ? subjects : await academicService.getSubjects()
+      if (subjects.length === 0) setSubjects(subs)
+
+      const parsed = academicService.parseAcademicText(rawText, subs)
 
       setDetectedType(parsed.type)
       if (parsed.subjectId) {
         setSelectedSubjectId(parsed.subjectId)
-      } else if (subjects.length > 0) {
-        setSelectedSubjectId(subjects[0].id)
+      } else if (subs.length > 0) {
+        setSelectedSubjectId(subs[0].id)
       }
 
       setTitle(parsed.title)
@@ -76,7 +78,6 @@ export function QuickCaptureModal({ open, onOpenChange, onSuccess }: QuickCaptur
       setTopics(parsed.topics)
 
       if (parsed.extractedDate) {
-        // Format for datetime-local input: YYYY-MM-DDTHH:mm
         const d = parsed.extractedDate
         const iso = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
         setDeadline(iso)
@@ -84,51 +85,58 @@ export function QuickCaptureModal({ open, onOpenChange, onSuccess }: QuickCaptur
         setDeadline("")
       }
 
-      setIsAnalyzing(false)
       setStep("REVIEW")
-    }, 250)
+    } catch (err) {
+      console.error('Error analyzing text:', err)
+    } finally {
+      setIsAnalyzing(false)
+    }
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!selectedSubjectId || !title.trim()) return
 
-    if (detectedType === "ASSIGNMENT") {
-      academicService.createAssignment({
+    try {
+      if (detectedType === "ASSIGNMENT") {
+        await academicService.createAssignment({
+          subjectId: selectedSubjectId,
+          title: title.trim(),
+          description: rawText.trim(),
+          originalAnnouncement: rawText.trim(),
+          deadline: deadline ? new Date(deadline) : null,
+          deadlineConfirmed: !isAmbiguousDate && !!deadline,
+          priority,
+          status: "NOT_STARTED",
+          sortOrder: 0,
+        })
+      } else if (["QUIZ", "EXAM", "PRESENTATION"].includes(detectedType)) {
+        await academicService.createEvent({
+          subjectId: selectedSubjectId,
+          title: title.trim(),
+          eventType: detectedType as any,
+          date: deadline ? new Date(deadline) : null,
+          description: rawText.trim(),
+          originalAnnouncement: rawText.trim(),
+          priority,
+          status: "UPCOMING",
+          topics: topics.map((t, idx) => ({ id: `top-${idx}`, topic: t })),
+        })
+      }
+
+      // Always preserve original announcement
+      await academicService.createAnnouncement({
         subjectId: selectedSubjectId,
         title: title.trim(),
-        description: rawText.trim(),
-        originalAnnouncement: rawText.trim(),
-        deadline: deadline ? new Date(deadline) : null,
-        deadlineConfirmed: !isAmbiguousDate && !!deadline,
-        priority,
-        status: "NOT_STARTED",
-        sortOrder: 0,
+        originalMessage: rawText.trim(),
+        category: detectedType as any,
+        source,
       })
-    } else if (["QUIZ", "EXAM", "PRESENTATION"].includes(detectedType)) {
-      academicService.createEvent({
-        subjectId: selectedSubjectId,
-        title: title.trim(),
-        eventType: detectedType as any,
-        date: deadline ? new Date(deadline) : null,
-        description: rawText.trim(),
-        originalAnnouncement: rawText.trim(),
-        priority,
-        status: "UPCOMING",
-        topics: topics.map((t, idx) => ({ id: `top-${idx}`, topic: t })),
-      })
+
+      onOpenChange(false)
+      if (onSuccess) onSuccess()
+    } catch (err) {
+      console.error('Failed to save captured item:', err)
     }
-
-    // Always preserve original announcement
-    academicService.createAnnouncement({
-      subjectId: selectedSubjectId,
-      title: title.trim(),
-      originalMessage: rawText.trim(),
-      category: detectedType as any,
-      source,
-    })
-
-    onOpenChange(false)
-    if (onSuccess) onSuccess()
   }
 
   return (

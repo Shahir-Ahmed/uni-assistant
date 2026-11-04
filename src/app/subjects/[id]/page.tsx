@@ -41,19 +41,30 @@ export default function SubjectWorkspacePage() {
   const [studyNotes, setStudyNotes] = React.useState<StudyNote[]>([])
   const [activeTab, setActiveTab] = React.useState("overview")
 
-  const loadData = React.useCallback(() => {
+  const loadData = React.useCallback(async () => {
     if (!subjectId) return
-    const sub = academicService.getSubjectById(subjectId)
-    if (!sub) {
-      router.push("/subjects")
-      return
+    try {
+      const sub = await academicService.getSubjectById(subjectId)
+      if (!sub) {
+        router.push("/subjects")
+        return
+      }
+      setSubject(sub)
+      const [asgs, evts, anns, res, notes] = await Promise.all([
+        academicService.getAssignments({ subjectId }),
+        academicService.getEvents({ subjectId }),
+        academicService.getAnnouncements({ subjectId }),
+        academicService.getResources({ subjectId }),
+        academicService.getStudyNotes({ subjectId }),
+      ])
+      setAssignments(asgs)
+      setEvents(evts)
+      setAnnouncements(anns)
+      setResources(res)
+      setStudyNotes(notes)
+    } catch (err) {
+      console.error('Failed to load subject workspace:', err)
     }
-    setSubject(sub)
-    setAssignments(academicService.getAssignments().filter((a) => a.subjectId === subjectId))
-    setEvents(academicService.getEvents().filter((e) => e.subjectId === subjectId))
-    setAnnouncements(academicService.getAnnouncements().filter((a) => a.subjectId === subjectId))
-    setResources(academicService.getResources().filter((r) => r.subjectId === subjectId))
-    setStudyNotes(academicService.getStudyNotes().filter((n) => n.subjectId === subjectId))
   }, [subjectId, router])
 
   React.useEffect(() => {

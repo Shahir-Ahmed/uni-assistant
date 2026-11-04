@@ -33,13 +33,28 @@ export default function DashboardPage() {
   const [announcements, setAnnouncements] = React.useState<Announcement[]>([])
   const [resources, setResources] = React.useState<Resource[]>([])
   const [captureOpen, setCaptureOpen] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
 
-  const loadData = React.useCallback(() => {
-    setSubjects(academicService.getSubjects())
-    setAssignments(academicService.getAssignments())
-    setEvents(academicService.getEvents())
-    setAnnouncements(academicService.getAnnouncements())
-    setResources(academicService.getResources())
+  const loadData = React.useCallback(async () => {
+    setLoading(true)
+    try {
+      const [s, a, e, an, r] = await Promise.all([
+        academicService.getSubjects(),
+        academicService.getAssignments(),
+        academicService.getEvents(),
+        academicService.getAnnouncements(),
+        academicService.getResources(),
+      ])
+      setSubjects(s)
+      setAssignments(a)
+      setEvents(e)
+      setAnnouncements(an)
+      setResources(r)
+    } catch (err) {
+      console.error('Dashboard load error:', err)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   React.useEffect(() => {
@@ -59,10 +74,10 @@ export default function DashboardPage() {
     .sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime())
     .slice(0, 3)
 
-  const handleToggleComplete = (assignment: Assignment) => {
+  const handleToggleComplete = async (assignment: Assignment) => {
     const nextStatus = assignment.status === 'COMPLETED' ? 'IN_PROGRESS' : 'COMPLETED'
-    academicService.updateAssignment(assignment.id, { status: nextStatus }, 'Toggled from Dashboard')
-    loadData()
+    await academicService.updateAssignment(assignment.id, { status: nextStatus }, 'Toggled from Dashboard')
+    await loadData()
   }
 
   return (

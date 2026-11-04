@@ -35,9 +35,13 @@ function SearchContent() {
     resources: [],
   })
 
-  const performSearch = React.useCallback((q: string) => {
-    const res = academicService.searchAll(q)
-    setResults(res)
+  const performSearch = React.useCallback(async (q: string) => {
+    try {
+      const res = await academicService.searchAll(q)
+      setResults(res)
+    } catch (err) {
+      console.error('Search failed:', err)
+    }
   }, [])
 
   React.useEffect(() => {

@@ -72,9 +72,17 @@ export default function AssignmentsPage() {
   const [personalNotes, setPersonalNotes] = React.useState("")
   const [changeReason, setChangeReason] = React.useState("")
 
-  const loadData = React.useCallback(() => {
-    setAssignments(academicService.getAssignments())
-    setSubjects(academicService.getSubjects())
+  const loadData = React.useCallback(async () => {
+    try {
+      const [asgs, subs] = await Promise.all([
+        academicService.getAssignments(),
+        academicService.getSubjects(),
+      ])
+      setAssignments(asgs)
+      setSubjects(subs)
+    } catch (err) {
+      console.error('Failed to load assignments:', err)
+    }
   }, [])
 
   React.useEffect(() => {
@@ -121,60 +129,60 @@ export default function AssignmentsPage() {
     setDialogOpen(true)
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!title.trim() || !subjectId) return
 
     if (editingAssignment) {
-      academicService.updateAssignment(
+      await academicService.updateAssignment(
         editingAssignment.id,
         {
           title: title.trim(),
           subjectId,
-          description: description.trim() || null,
-          instructions: instructions.trim() || null,
+          description: description.trim() || undefined,
+          instructions: instructions.trim() || undefined,
           deadline: deadline ? new Date(deadline) : null,
           deadlineConfirmed: true,
           priority,
           status,
-          submissionMethod: submissionMethod.trim() || null,
-          submissionLink: submissionLink.trim() || null,
-          estimatedEffort: estimatedEffort.trim() || null,
-          personalNotes: personalNotes.trim() || null,
+          submissionMethod: submissionMethod.trim() || undefined,
+          submissionLink: submissionLink.trim() || undefined,
+          estimatedEffort: estimatedEffort.trim() || undefined,
+          personalNotes: personalNotes.trim() || undefined,
         },
         changeReason || 'Updated from assignment manager'
       )
     } else {
-      academicService.createAssignment({
+      await academicService.createAssignment({
         title: title.trim(),
         subjectId,
-        description: description.trim() || null,
-        instructions: instructions.trim() || null,
+        description: description.trim() || undefined,
+        instructions: instructions.trim() || undefined,
         deadline: deadline ? new Date(deadline) : null,
         deadlineConfirmed: true,
         priority,
         status,
-        submissionMethod: submissionMethod.trim() || null,
-        submissionLink: submissionLink.trim() || null,
-        estimatedEffort: estimatedEffort.trim() || null,
-        personalNotes: personalNotes.trim() || null,
+        submissionMethod: submissionMethod.trim() || undefined,
+        submissionLink: submissionLink.trim() || undefined,
+        estimatedEffort: estimatedEffort.trim() || undefined,
+        personalNotes: personalNotes.trim() || undefined,
         sortOrder: 0,
       })
     }
 
     setDialogOpen(false)
-    loadData()
+    await loadData()
   }
 
-  const handleToggleStatus = (asg: Assignment) => {
+  const handleToggleStatus = async (asg: Assignment) => {
     const nextStatus: AssignmentStatus = asg.status === 'COMPLETED' ? 'IN_PROGRESS' : 'COMPLETED'
-    academicService.updateAssignment(asg.id, { status: nextStatus }, 'Quick toggled status')
-    loadData()
+    await academicService.updateAssignment(asg.id, { status: nextStatus }, 'Quick toggled status')
+    await loadData()
   }
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm("Delete this assignment record? This will remove its scheduled reminders.")) {
-      academicService.deleteAssignment(id)
-      loadData()
+      await academicService.deleteAssignment(id)
+      await loadData()
     }
   }
 

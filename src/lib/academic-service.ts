@@ -1,3 +1,15 @@
+/**
+ * ScholarOS Academic Service — Resilient Offline-First & Database Layer
+ *
+ * Implements a dual-layer persistence strategy:
+ * 1. Primary: PostgreSQL database via Next.js REST API routes (/api/*)
+ * 2. Secondary & Offline Cache: Local browser storage (localStorage)
+ *
+ * If the user is online and the database is configured, all data is synced
+ * to PostgreSQL and cached locally.
+ * If the database is unreachable or offline, data persists locally without
+ * any loss across page reloads or device restarts.
+ */
 import {
   Subject,
   Assignment,
@@ -6,14 +18,15 @@ import {
   Resource,
   StudyNote,
   Reminder,
-  InboxItem,
   AssignmentStatus,
   Priority,
   EventType,
   AnnouncementCategory,
 } from '@/types'
 
-// Mock / Initial Seed Data for Demo purposes
+// ─────────────────────────────────────────────────────
+// Initial Seed Data (serves as demo data for fresh installs)
+// ─────────────────────────────────────────────────────
 export const initialSubjects: Subject[] = [
   {
     id: 'sub-1',
@@ -53,15 +66,15 @@ export const initialSubjects: Subject[] = [
     code: 'CS-302',
     semester: 'Fall 2026',
     academicYear: '2026-2027',
-    instructor: 'Engr. Bilal Ahmed',
-    description: 'Processes, threads, CPU scheduling algorithms, synchronization, deadlocks, virtual memory.',
-    color: '#10B981',
+    instructor: 'Dr. Salman Haider',
+    description: 'Processes, CPU scheduling, synchronization, deadlock, memory management, virtual memory.',
+    color: '#0D9488',
     icon: 'Cpu',
     isArchived: false,
     sortOrder: 3,
     createdAt: new Date('2026-09-01'),
     updatedAt: new Date('2026-10-22'),
-    _count: { assignments: 1, announcements: 1, academicEvents: 1, resources: 5, studyNotes: 3 },
+    _count: { assignments: 1, announcements: 1, academicEvents: 1, resources: 2, studyNotes: 1 },
   },
   {
     id: 'sub-4',
@@ -69,15 +82,15 @@ export const initialSubjects: Subject[] = [
     code: 'CS-308',
     semester: 'Fall 2026',
     academicYear: '2026-2027',
-    instructor: 'Dr. Kamran Malik',
-    description: 'OSI and TCP/IP stack, routing protocols, subnetting, transport layer, socket programming.',
-    color: '#F59E0B',
+    instructor: 'Engr. Noman Ahmed',
+    description: 'OSI and TCP/IP models, routing protocols, TCP congestion control, DNS, socket programming.',
+    color: '#D97706',
     icon: 'Network',
     isArchived: false,
     sortOrder: 4,
     createdAt: new Date('2026-09-01'),
     updatedAt: new Date('2026-10-18'),
-    _count: { assignments: 0, announcements: 1, academicEvents: 0, resources: 2, studyNotes: 1 },
+    _count: { assignments: 0, announcements: 1, academicEvents: 1, resources: 2, studyNotes: 0 },
   },
 ]
 
@@ -87,7 +100,7 @@ export const initialAssignments: Assignment[] = [
     subjectId: 'sub-1',
     title: 'Assignment 2: ER Diagram and Relational Schema',
     description: 'Design a complete ER diagram for a Hospital Management System and map it to 3NF relational schema.',
-    instructions: '1. Create conceptual ER diagram with cardinalities.\n2. Convert entities and relationships into relational schema.\n3. Identify primary and foreign keys.\n4. Ensure relations are in BCNF/3NF.',
+    instructions: '1. Create conceptual ER diagram with cardinalities.\n2. Convert entities into relational schema.\n3. Identify primary and foreign keys.\n4. Ensure relations are in BCNF/3NF.',
     originalAnnouncement: 'Database Systems assignment 2: Prepare an ER diagram and relational schema. Submission deadline is November 5 at 11:59 PM. The assignment was announced by our CR today.',
     assignedDate: new Date('2026-10-20'),
     deadline: new Date('2026-11-05T23:59:00'),
@@ -97,9 +110,10 @@ export const initialAssignments: Assignment[] = [
     priority: 'HIGH',
     estimatedEffort: '6-8 hours',
     status: 'IN_PROGRESS',
-    personalNotes: 'Need to review weak entities and ternary relationships before finalizing the schema.',
+    personalNotes: 'Need to review weak entities and ternary relationships before finalizing schema.',
     createdAt: new Date('2026-10-20T14:30:00'),
     updatedAt: new Date('2026-10-24T18:00:00'),
+    subject: initialSubjects[0],
   },
   {
     id: 'asg-2',
@@ -117,21 +131,25 @@ export const initialAssignments: Assignment[] = [
     status: 'NOT_STARTED',
     createdAt: new Date('2026-10-22T10:00:00'),
     updatedAt: new Date('2026-10-22T10:00:00'),
+    subject: initialSubjects[1],
   },
   {
     id: 'asg-3',
     subjectId: 'sub-3',
     title: 'Multi-threaded CPU Scheduling Simulator',
-    description: 'Develop a C/C++ program simulating Round Robin (RR) with dynamic time quantum and Shortest Job First (SJF) scheduling.',
-    originalAnnouncement: 'OS programming assignment released. Due Oct 30, 2026 at 11:59 PM.',
+    description: 'Simulate FCFS, Round Robin (Quantum = 4ms), and Priority Preemptive algorithms using POSIX threads.',
+    instructions: 'Output Gantt chart visualization and average turnaround / waiting times in terminal.',
+    originalAnnouncement: 'Dr. Salman Haider: OS Lab Project 1 assigned. Due Nov 18.',
     assignedDate: new Date('2026-10-15'),
-    deadline: new Date('2026-10-30T23:59:00'),
+    deadline: new Date('2026-11-18T23:59:00'),
     deadlineConfirmed: true,
-    priority: 'URGENT',
-    estimatedEffort: '8 hours',
-    status: 'READY_TO_SUBMIT',
-    createdAt: new Date('2026-10-15T09:00:00'),
-    updatedAt: new Date('2026-10-24T21:00:00'),
+    submissionMethod: 'Turnitin Portal',
+    priority: 'MEDIUM',
+    estimatedEffort: '12 hours',
+    status: 'NOT_STARTED',
+    createdAt: new Date('2026-10-15'),
+    updatedAt: new Date('2026-10-15'),
+    subject: initialSubjects[2],
   },
 ]
 
@@ -141,7 +159,7 @@ export const initialEvents: AcademicEvent[] = [
     subjectId: 'sub-3',
     title: 'Operating Systems Quiz 2',
     eventType: 'QUIZ',
-    date: new Date('2026-10-28T10:00:00'),
+    date: new Date('2026-11-08T10:00:00'),
     startTime: '10:00 AM',
     endTime: '10:45 AM',
     location: 'Lab 4 / Room 208',
@@ -157,27 +175,29 @@ export const initialEvents: AcademicEvent[] = [
     ],
     createdAt: new Date('2026-10-21'),
     updatedAt: new Date('2026-10-21'),
+    subject: initialSubjects[2],
   },
   {
     id: 'evt-2',
     subjectId: 'sub-2',
-    title: 'AI Midterm Exam',
+    title: 'Artificial Intelligence Midterm Exam',
     eventType: 'MIDTERM',
-    date: new Date('2026-11-15T09:00:00'),
+    date: new Date('2026-11-22T09:00:00'),
     startTime: '09:00 AM',
     endTime: '11:00 AM',
     location: 'Auditorium Hall B',
-    description: 'Midterm Examination covering Lectures 1 through 14.',
-    priority: 'URGENT',
+    description: 'Comprehensive Midterm covering uninformed search (BFS, DFS), informed search (A*, Greedy), Adversarial Search (Minimax, Alpha-Beta Pruning), and CSPs.',
+    originalAnnouncement: 'Academic Office: Midterm schedule published. AI Exam on Nov 22.',
+    priority: 'HIGH',
     status: 'UPCOMING',
     topics: [
-      { id: 'top-5', topic: 'Uninformed & Heuristic Search' },
-      { id: 'top-6', topic: 'Adversarial Search & Minimax' },
+      { id: 'top-5', topic: 'State Space Search & Heuristics' },
+      { id: 'top-6', topic: 'Game Playing & Minimax pruning' },
       { id: 'top-7', topic: 'Constraint Satisfaction Problems' },
-      { id: 'top-8', topic: 'Propositional & First-Order Logic' },
     ],
-    createdAt: new Date('2026-10-10'),
-    updatedAt: new Date('2026-10-10'),
+    createdAt: new Date('2026-10-20'),
+    updatedAt: new Date('2026-10-20'),
+    subject: initialSubjects[1],
   },
 ]
 
@@ -185,476 +205,732 @@ export const initialAnnouncements: Announcement[] = [
   {
     id: 'ann-1',
     subjectId: 'sub-1',
-    title: 'Assignment 2 Announced by CR',
+    title: 'Database Assignment 2 Announced',
     originalMessage: 'Database Systems assignment 2: Prepare an ER diagram and relational schema. Submission deadline is November 5 at 11:59 PM. The assignment was announced by our CR today.',
     category: 'ASSIGNMENT',
-    source: 'Class Representative (Ali)',
-    sourceGroup: 'BSCS 2024-2028 Section A',
-    dateReceived: new Date('2026-10-20T14:15:00'),
+    source: 'Class Representative (CR)',
+    dateReceived: new Date('2026-10-20T11:00:00'),
     isProcessed: true,
-    createdAt: new Date('2026-10-20T14:15:00'),
-    updatedAt: new Date('2026-10-20T14:15:00'),
+    personalRemarks: 'Confirmed with CR that group submission is not allowed.',
+    createdAt: new Date('2026-10-20'),
+    updatedAt: new Date('2026-10-20'),
+    subject: initialSubjects[0],
   },
   {
     id: 'ann-2',
     subjectId: 'sub-3',
-    title: 'OS Quiz Announcement',
-    originalMessage: 'Attention everyone: Engr. Bilal announced our OS quiz on Wednesday at 10 AM covering CPU scheduling, threads, and deadlocks. Prepare thoroughly from lecture slides 5 to 8.',
+    title: 'OS Quiz 2 Topics Announced by Instructor',
+    originalMessage: 'Dear students, Quiz 2 will take place on Wednesday at 10:00 AM in Lab 4. Topics: CPU Scheduling, Semaphores, and Deadlock Avoidance.',
     category: 'QUIZ',
-    source: 'Class Representative (Ali)',
-    sourceGroup: 'BSCS 2024-2028 Section A',
-    dateReceived: new Date('2026-10-21T18:00:00'),
+    source: 'Course Instructor',
+    dateReceived: new Date('2026-10-21T14:15:00'),
     isProcessed: true,
-    createdAt: new Date('2026-10-21T18:00:00'),
-    updatedAt: new Date('2026-10-21T18:00:00'),
+    personalRemarks: 'Need to review Banker algorithm practice problems.',
+    createdAt: new Date('2026-10-21'),
+    updatedAt: new Date('2026-10-21'),
+    subject: initialSubjects[2],
   },
 ]
 
 export const initialResources: Resource[] = [
   {
     id: 'res-1',
-    subjectId: 'sub-1',
-    title: 'Lecture 06 - ER Modeling and Conceptual Schema Design',
-    description: 'Entity types, relationship sets, weak entities, ternary relationships, participation constraints.',
-    resourceType: 'PDF',
-    fileName: 'DB_Lecture_06_ER_Modeling.pdf',
-    fileSize: 4250000,
-    category: 'LECTURE_SLIDES',
-    isProcessed: true,
-    processingStatus: 'completed',
-    lectureNumber: 6,
-    createdAt: new Date('2026-10-12'),
-    updatedAt: new Date('2026-10-12'),
-    extractedTexts: [
-      { id: 'et-1', slideNumber: 1, content: 'Database Design Process: Requirements Analysis -> Conceptual Design (ER) -> Logical Design (Relational) -> Physical Design.' },
-      { id: 'et-2', slideNumber: 5, content: 'Entities & Attributes: Entity is a real-world object distinguishable from other objects. Key attribute uniquely identifies entity.' },
-      { id: 'et-3', slideNumber: 12, content: 'Weak Entity Types: An entity type that does not have key attributes of its own. Identified by being related to specific entities from an identifying owner entity type.' },
-      { id: 'et-4', slideNumber: 18, content: 'Relational Mapping Algorithm: Step 1: Regular entity types. Step 2: Weak entity types. Step 3: 1:1 relationships. Step 4: 1:N relationships. Step 5: M:N relationships.' },
-    ],
-  },
-  {
-    id: 'res-2',
     subjectId: 'sub-3',
-    title: 'Lecture 08 - Deadlocks and Synchronization',
-    description: 'Necessary conditions for deadlock, Resource Allocation Graph (RAG), Banker algorithm, avoidance vs prevention.',
+    title: 'Lecture 08: Deadlock Handling & Banker’s Algorithm',
     resourceType: 'PDF',
-    fileName: 'OS_Lec08_Deadlocks.pdf',
-    fileSize: 3800000,
+    fileName: 'CS302_Lecture08_Deadlocks.pdf',
     category: 'LECTURE_SLIDES',
     isProcessed: true,
     processingStatus: 'completed',
-    lectureNumber: 8,
     createdAt: new Date('2026-10-18'),
     updatedAt: new Date('2026-10-18'),
     extractedTexts: [
-      { id: 'et-5', slideNumber: 2, content: 'The Deadlock Problem: A set of blocked processes each holding a resource and waiting to acquire a resource held by another process in the set.' },
-      { id: 'et-6', slideNumber: 4, content: 'Four Coffman Conditions: 1. Mutual Exclusion. 2. Hold and Wait. 3. No Preemption. 4. Circular Wait.' },
-      { id: 'et-7', slideNumber: 11, content: 'Banker’s Algorithm: Avoidance algorithm for multiple instances of each resource type. Checks if granting a request leaves the system in a safe state.' },
+      { id: 'et-1', slideNumber: 1, content: 'Deadlock Characterization: Mutual Exclusion, Hold and Wait, No Preemption, Circular Wait.' },
+      { id: 'et-2', slideNumber: 2, content: 'Bankers Algorithm: Safe State verification, Allocation Matrix, Max Matrix, Available Vector.' },
     ],
+    subject: initialSubjects[2],
+  },
+  {
+    id: 'res-2',
+    subjectId: 'sub-1',
+    title: 'Lecture 06: Functional Dependencies & Normal Forms (1NF-BCNF)',
+    resourceType: 'PDF',
+    fileName: 'CS301_Lecture06_Normalization.pdf',
+    category: 'LECTURE_SLIDES',
+    isProcessed: true,
+    processingStatus: 'completed',
+    createdAt: new Date('2026-10-16'),
+    updatedAt: new Date('2026-10-16'),
+    extractedTexts: [
+      { id: 'et-3', slideNumber: 1, content: 'Functional dependencies: X -> Y. Closure of attribute sets. Finding candidate keys using Armstrong axioms.' },
+      { id: 'et-4', slideNumber: 2, content: 'Lossless join decomposition and dependency preservation checks.' },
+    ],
+    subject: initialSubjects[0],
   },
 ]
 
 export const initialStudyNotes: StudyNote[] = [
   {
     id: 'note-1',
-    subjectId: 'sub-1',
-    title: 'Beginner-Friendly Guide: ER to Relational Schema Mapping',
+    subjectId: 'sub-3',
+    title: 'Beginner-Friendly Guide: Banker’s Algorithm Explained',
     noteType: 'DETAILED',
+    content: `# Beginner-Friendly Guide: Banker's Algorithm
+
+## 1. The Real-World Intuition
+Imagine a bank with 10 customers requesting credit. The bank cannot lend out more total cash than it physically possesses in the vault at any moment. Before granting a loan, the banker simulates whether every customer can eventually pay off their debt without causing a bank collapse.
+
+## 2. Four Necessary Conditions for Deadlock
+1. **Mutual Exclusion:** Only one process can use a resource at a time.
+2. **Hold and Wait:** A process is holding at least one resource and requesting additional ones.
+3. **No Preemption:** Resources cannot be forcibly taken away from a process.
+4. **Circular Wait:** Process P0 waits for P1, which waits for P2... which waits for P0.
+
+## 3. Banker's Algorithm Logic
+For each process $P_i$, calculate:
+$$\\text{Need}[i][j] = \\text{Max}[i][j] - \\text{Allocation}[i][j]$$
+
+If $\\text{Need} \\le \\text{Available}$, the process can complete safely and release its allocated resources back to the pool.
+`,
     isGenerated: true,
     version: 1,
-    content: `# ER to Relational Mapping — Explained for Beginners
-
-## 1. What is an ER Diagram?
-Think of an **ER (Entity-Relationship) Diagram** as the architectural blueprint of a house before laying the physical bricks. It shows what "things" exist in your system (e.g., Students, Courses, Professors) and how they connect to one another.
-
-## 2. The 7-Step Mapping Recipe
-To turn this blueprint into actual SQL tables, follow these standardized steps:
-
-### Step 1: Strong (Regular) Entities
-Each independent entity becomes its own table. Its primary key becomes the table's primary key.
-* **Example:** \`Student(StudentID [PK], Name, Email, DateOfBirth)\`
-
-### Step 2: Weak Entities
-A weak entity cannot exist without its "owner" (parent).
-* **Real-world Analogy:** An \`Apartment\` cannot exist without the \`Building\` it is inside.
-* **Mapping Rule:** Create a table for the weak entity. Include its partial key AND the primary key of the owner entity as a foreign key. Together they form a composite primary key.
-
-### Step 3: 1:1 Relationships
-Put the foreign key on the side with total participation (mandatory).
-
-### Step 4: 1:N Relationships
-Always put the foreign key on the **"Many"** side!
-* **Example:** One Department has Many Professors. So put \`DepartmentID\` inside the \`Professor\` table.
-
-### Step 5: M:N (Many-to-Many) Relationships
-Create a **cross-reference (junction) table**.
-* **Example:** Students enroll in Courses.
-* \`Enrollment(StudentID [FK], CourseID [FK], Semester, Grade)\` with composite primary key \`(StudentID, CourseID)\`.
-
-## 3. Practice Checklist
-- [ ] Are all primary keys underlined?
-- [ ] Are foreign keys mapped to existing parent tables?
-- [ ] Have all multi-valued attributes been moved to separate tables?
-`,
     createdAt: new Date('2026-10-21'),
     updatedAt: new Date('2026-10-21'),
+    subject: initialSubjects[2],
   },
 ]
 
-// ==========================================
-// CLIENT-SIDE / RUNTIME SERVICE
-// ==========================================
-
-const STORAGE_KEYS = {
-  SUBJECTS: 'scholaros_subjects_v1',
-  ASSIGNMENTS: 'scholaros_assignments_v1',
-  EVENTS: 'scholaros_events_v1',
-  ANNOUNCEMENTS: 'scholaros_announcements_v1',
-  RESOURCES: 'scholaros_resources_v1',
-  NOTES: 'scholaros_notes_v1',
-  REMINDERS: 'scholaros_reminders_v1',
-  INBOX: 'scholaros_inbox_v1',
-  SETTINGS: 'scholaros_ai_settings_v1',
+// ─────────────────────────────────────────────────────
+// Local Storage Cache Keys
+// ─────────────────────────────────────────────────────
+const CACHE_KEYS = {
+  SUBJECTS: 'scholaros_cache_subjects_v2',
+  ASSIGNMENTS: 'scholaros_cache_assignments_v2',
+  EVENTS: 'scholaros_cache_events_v2',
+  ANNOUNCEMENTS: 'scholaros_cache_announcements_v2',
+  RESOURCES: 'scholaros_cache_resources_v2',
+  NOTES: 'scholaros_cache_notes_v2',
 }
 
+function isBrowser(): boolean {
+  return typeof window !== 'undefined'
+}
+
+function getCache<T>(key: string, fallback: T): T {
+  if (!isBrowser()) return fallback
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw)
+    return parsed !== null && parsed !== undefined ? parsed : fallback
+  } catch (err) {
+    console.warn(`Cache read error for ${key}:`, err)
+    return fallback
+  }
+}
+
+function setCache<T>(key: string, value: T): void {
+  if (!isBrowser()) return
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch (err) {
+    console.warn(`Cache write error for ${key}:`, err)
+  }
+}
+
+// ─────────────────────────────────────────────────────
+// Helper: API Fetch
+// ─────────────────────────────────────────────────────
+function apiUrl(path: string): string {
+  if (typeof window !== 'undefined') return path
+  const base = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000'
+  return `${base}${path}`
+}
+
+async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(apiUrl(path), {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err.error || `API error: ${res.status}`)
+  }
+  return res.json()
+}
+
+// ─────────────────────────────────────────────────────
+// ACADEMIC SERVICE CLASS (Hybrid Offline-First)
+// ─────────────────────────────────────────────────────
 class AcademicService {
-  private memoryStore: Map<string, any> = new Map()
+  // ── SUBJECTS ──────────────────────────────────────
 
-  private isBrowser(): boolean {
-    return typeof window !== 'undefined'
-  }
-
-  private getItem<T>(key: string, defaultValue: T): T {
-    if (!this.isBrowser()) {
-      return this.memoryStore.has(key) ? this.memoryStore.get(key) : defaultValue
-    }
+  async getSubjects(): Promise<Subject[]> {
     try {
-      const item = localStorage.getItem(key)
-      return item ? JSON.parse(item) : defaultValue
-    } catch (e) {
-      console.warn(`Error reading ${key} from storage:`, e)
-      return defaultValue
+      const data = await apiFetch<Subject[]>('/api/subjects')
+      if (Array.isArray(data) && data.length > 0) {
+        setCache(CACHE_KEYS.SUBJECTS, data)
+        return data
+      }
+      // If DB has no subjects yet, check local cache or fallback to initial seed
+      const cached = getCache<Subject[]>(CACHE_KEYS.SUBJECTS, initialSubjects)
+      return cached
+    } catch {
+      // Offline fallback
+      return getCache<Subject[]>(CACHE_KEYS.SUBJECTS, initialSubjects)
     }
   }
 
-  private setItem<T>(key: string, value: T): void {
-    if (!this.isBrowser()) {
-      this.memoryStore.set(key, value)
-      return
-    }
+  async getSubjectById(id: string): Promise<Subject | null> {
     try {
-      localStorage.setItem(key, JSON.stringify(value))
-    } catch (e) {
-      console.error(`Error saving ${key} to storage:`, e)
+      const sub = await apiFetch<Subject>(`/api/subjects/${id}`)
+      if (sub) return sub
+    } catch {
+      // fallback to cache
     }
+    const cached = await this.getSubjects()
+    return cached.find((s) => s.id === id) || null
   }
 
-  // --- SUBJECTS ---
-  getSubjects(): Subject[] {
-    return this.getItem<Subject[]>(STORAGE_KEYS.SUBJECTS, initialSubjects)
-  }
-
-  getSubjectById(id: string): Subject | undefined {
-    return this.getSubjects().find((s) => s.id === id)
-  }
-
-  createSubject(data: Omit<Subject, 'id' | 'createdAt' | 'updatedAt' | 'isArchived' | 'sortOrder'>): Subject {
-    const subjects = this.getSubjects()
-    const newSubject: Subject = {
+  async createSubject(data: Omit<Subject, 'id' | 'createdAt' | 'updatedAt' | 'isArchived' | 'sortOrder'>): Promise<Subject> {
+    const tempId = `sub-${Date.now()}`
+    const localSubject: Subject = {
       ...data,
-      id: `sub-${Date.now()}`,
+      id: tempId,
       isArchived: false,
-      sortOrder: subjects.length + 1,
+      sortOrder: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
       _count: { assignments: 0, announcements: 0, academicEvents: 0, resources: 0, studyNotes: 0 },
     }
-    this.setItem(STORAGE_KEYS.SUBJECTS, [newSubject, ...subjects])
-    return newSubject
+
+    // Immediately persist locally
+    const current = getCache<Subject[]>(CACHE_KEYS.SUBJECTS, initialSubjects)
+    const updated = [localSubject, ...current]
+    setCache(CACHE_KEYS.SUBJECTS, updated)
+
+    // Attempt cloud database sync
+    try {
+      const serverSubject = await apiFetch<Subject>('/api/subjects', { method: 'POST', body: JSON.stringify(data) })
+      if (serverSubject && serverSubject.id) {
+        const synced = updated.map((s) => (s.id === tempId ? serverSubject : s))
+        setCache(CACHE_KEYS.SUBJECTS, synced)
+        return serverSubject
+      }
+    } catch (err) {
+      console.warn('Syncing subject to server DB postponed (stored in local offline cache):', err)
+    }
+    return localSubject
   }
 
-  updateSubject(id: string, updates: Partial<Subject>): Subject | null {
-    const subjects = this.getSubjects()
-    const index = subjects.findIndex((s) => s.id === id)
-    if (index === -1) return null
-    const updated = { ...subjects[index], ...updates, updatedAt: new Date() }
-    subjects[index] = updated
-    this.setItem(STORAGE_KEYS.SUBJECTS, subjects)
-    return updated
+  async updateSubject(id: string, updates: Partial<Subject>): Promise<Subject | null> {
+    const current = getCache<Subject[]>(CACHE_KEYS.SUBJECTS, initialSubjects)
+    const idx = current.findIndex((s) => s.id === id)
+    let updatedItem: Subject | null = null
+    if (idx !== -1) {
+      updatedItem = { ...current[idx], ...updates, updatedAt: new Date() }
+      current[idx] = updatedItem
+      setCache(CACHE_KEYS.SUBJECTS, [...current])
+    }
+
+    try {
+      const serverSubject = await apiFetch<Subject>(`/api/subjects/${id}`, { method: 'PATCH', body: JSON.stringify(updates) })
+      if (serverSubject) {
+        if (idx !== -1) {
+          current[idx] = serverSubject
+          setCache(CACHE_KEYS.SUBJECTS, [...current])
+        }
+        return serverSubject
+      }
+    } catch {
+      // Local update is already preserved
+    }
+    return updatedItem
   }
 
-  deleteSubject(id: string): boolean {
-    const subjects = this.getSubjects().filter((s) => s.id !== id)
-    this.setItem(STORAGE_KEYS.SUBJECTS, subjects)
+  async deleteSubject(id: string): Promise<boolean> {
+    const current = getCache<Subject[]>(CACHE_KEYS.SUBJECTS, initialSubjects)
+    const filtered = current.filter((s) => s.id !== id)
+    setCache(CACHE_KEYS.SUBJECTS, filtered)
+
+    try {
+      await apiFetch(`/api/subjects/${id}`, { method: 'DELETE' })
+    } catch {
+      // ignore offline failure
+    }
     return true
   }
 
-  // --- ASSIGNMENTS ---
-  getAssignments(): Assignment[] {
-    const list = this.getItem<Assignment[]>(STORAGE_KEYS.ASSIGNMENTS, initialAssignments)
-    const subjects = this.getSubjects()
-    return list.map((a) => ({
-      ...a,
-      subject: subjects.find((s) => s.id === a.subjectId),
-    }))
+  async archiveSubject(id: string, archived: boolean): Promise<Subject | null> {
+    return this.updateSubject(id, { isArchived: archived })
   }
 
-  getAssignmentById(id: string): Assignment | undefined {
-    return this.getAssignments().find((a) => a.id === id)
+  // ── ASSIGNMENTS ───────────────────────────────────
+
+  async getAssignments(filters?: { subjectId?: string; status?: string }): Promise<Assignment[]> {
+    let list: Assignment[] = []
+    try {
+      const params = new URLSearchParams()
+      if (filters?.subjectId) params.set('subjectId', filters.subjectId)
+      if (filters?.status) params.set('status', filters.status)
+      const qs = params.toString()
+      const data = await apiFetch<Assignment[]>(`/api/assignments${qs ? `?${qs}` : ''}`)
+      if (Array.isArray(data) && data.length > 0) {
+        setCache(CACHE_KEYS.ASSIGNMENTS, data)
+        list = data
+      } else {
+        list = getCache<Assignment[]>(CACHE_KEYS.ASSIGNMENTS, initialAssignments)
+      }
+    } catch {
+      list = getCache<Assignment[]>(CACHE_KEYS.ASSIGNMENTS, initialAssignments)
+    }
+
+    if (filters?.subjectId) {
+      list = list.filter((a) => a.subjectId === filters.subjectId)
+    }
+    if (filters?.status) {
+      list = list.filter((a) => a.status === filters.status)
+    }
+    return list
   }
 
-  createAssignment(data: Omit<Assignment, 'id' | 'createdAt' | 'updatedAt' | 'history'>): Assignment {
-    const assignments = this.getItem<Assignment[]>(STORAGE_KEYS.ASSIGNMENTS, initialAssignments)
-    const newAssignment: Assignment = {
+  async getAssignmentById(id: string): Promise<Assignment | null> {
+    try {
+      const asg = await apiFetch<Assignment>(`/api/assignments/${id}`)
+      if (asg) return asg
+    } catch {
+      // fallback
+    }
+    const all = await this.getAssignments()
+    return all.find((a) => a.id === id) || null
+  }
+
+  async createAssignment(data: Omit<Assignment, 'id' | 'createdAt' | 'updatedAt' | 'history' | 'subject'>): Promise<Assignment> {
+    const tempId = `asg-${Date.now()}`
+    const localAsg: Assignment = {
       ...data,
-      id: `asg-${Date.now()}`,
+      id: tempId,
       createdAt: new Date(),
       updatedAt: new Date(),
       history: [
         {
           id: `hist-${Date.now()}`,
-          assignmentId: `asg-${Date.now()}`,
+          assignmentId: tempId,
           field: 'STATUS',
-          oldValue: null,
           newValue: data.status,
           changedAt: new Date(),
           reason: 'Initial assignment creation',
         },
       ],
     }
-    const updated = [newAssignment, ...assignments]
-    this.setItem(STORAGE_KEYS.ASSIGNMENTS, updated)
-    this.scheduleAssignmentReminders(newAssignment)
-    return newAssignment
+
+    const current = getCache<Assignment[]>(CACHE_KEYS.ASSIGNMENTS, initialAssignments)
+    const updated = [localAsg, ...current]
+    setCache(CACHE_KEYS.ASSIGNMENTS, updated)
+
+    try {
+      const serverAsg = await apiFetch<Assignment>('/api/assignments', { method: 'POST', body: JSON.stringify(data) })
+      if (serverAsg && serverAsg.id) {
+        const synced = updated.map((a) => (a.id === tempId ? serverAsg : a))
+        setCache(CACHE_KEYS.ASSIGNMENTS, synced)
+        return serverAsg
+      }
+    } catch (err) {
+      console.warn('Syncing assignment postponed (saved locally in offline storage):', err)
+    }
+    return localAsg
   }
 
-  updateAssignment(id: string, updates: Partial<Assignment>, reason?: string): Assignment | null {
-    const assignments = this.getItem<Assignment[]>(STORAGE_KEYS.ASSIGNMENTS, initialAssignments)
-    const index = assignments.findIndex((a) => a.id === id)
-    if (index === -1) return null
+  async updateAssignment(id: string, updates: Partial<Assignment>, changeReason?: string): Promise<Assignment | null> {
+    const current = getCache<Assignment[]>(CACHE_KEYS.ASSIGNMENTS, initialAssignments)
+    const idx = current.findIndex((a) => a.id === id)
+    let updatedItem: Assignment | null = null
+    if (idx !== -1) {
+      updatedItem = { ...current[idx], ...updates, updatedAt: new Date() }
+      current[idx] = updatedItem
+      setCache(CACHE_KEYS.ASSIGNMENTS, [...current])
+    }
 
-    const existing = assignments[index]
-    const historyEntries = existing.history || []
-
-    // If deadline changed, record history and reschedule reminders
-    if (updates.deadline && updates.deadline !== existing.deadline) {
-      historyEntries.unshift({
-        id: `hist-${Date.now()}`,
-        assignmentId: id,
-        field: 'DEADLINE',
-        oldValue: existing.deadline ? String(existing.deadline) : 'None',
-        newValue: String(updates.deadline),
-        changedAt: new Date(),
-        reason: reason || 'Deadline updated',
+    try {
+      const serverAsg = await apiFetch<Assignment>(`/api/assignments/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ ...updates, _changeReason: changeReason }),
       })
+      if (serverAsg) {
+        if (idx !== -1) {
+          current[idx] = serverAsg
+          setCache(CACHE_KEYS.ASSIGNMENTS, [...current])
+        }
+        return serverAsg
+      }
+    } catch {
+      // Local update is active
     }
-
-    if (updates.status && updates.status !== existing.status) {
-      historyEntries.unshift({
-        id: `hist-${Date.now()}-status`,
-        assignmentId: id,
-        field: 'STATUS',
-        oldValue: existing.status,
-        newValue: updates.status,
-        changedAt: new Date(),
-        reason: reason || 'Status modified',
-      })
-    }
-
-    const updatedAssignment: Assignment = {
-      ...existing,
-      ...updates,
-      history: historyEntries,
-      updatedAt: new Date(),
-    }
-
-    assignments[index] = updatedAssignment
-    this.setItem(STORAGE_KEYS.ASSIGNMENTS, assignments)
-
-    if (updates.deadline || updates.status) {
-      this.scheduleAssignmentReminders(updatedAssignment)
-    }
-
-    return updatedAssignment
+    return updatedItem
   }
 
-  deleteAssignment(id: string): boolean {
-    const assignments = this.getItem<Assignment[]>(STORAGE_KEYS.ASSIGNMENTS, initialAssignments).filter((a) => a.id !== id)
-    this.setItem(STORAGE_KEYS.ASSIGNMENTS, assignments)
+  async deleteAssignment(id: string): Promise<boolean> {
+    const current = getCache<Assignment[]>(CACHE_KEYS.ASSIGNMENTS, initialAssignments)
+    const filtered = current.filter((a) => a.id !== id)
+    setCache(CACHE_KEYS.ASSIGNMENTS, filtered)
+
+    try {
+      await apiFetch(`/api/assignments/${id}`, { method: 'DELETE' })
+    } catch {
+      // ignore
+    }
     return true
   }
 
-  // --- ACADEMIC EVENTS (Quizzes, Exams) ---
-  getEvents(): AcademicEvent[] {
-    const list = this.getItem<AcademicEvent[]>(STORAGE_KEYS.EVENTS, initialEvents)
-    const subjects = this.getSubjects()
-    return list.map((e) => ({
-      ...e,
-      subject: subjects.find((s) => s.id === e.subjectId),
-    }))
-  }
+  // ── EVENTS ────────────────────────────────────────
 
-  createEvent(data: Omit<AcademicEvent, 'id' | 'createdAt' | 'updatedAt'>): AcademicEvent {
-    const events = this.getItem<AcademicEvent[]>(STORAGE_KEYS.EVENTS, initialEvents)
-    const newEvent: AcademicEvent = {
-      ...data,
-      id: `evt-${Date.now()}`,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }
-    this.setItem(STORAGE_KEYS.EVENTS, [newEvent, ...events])
-    return newEvent
-  }
-
-  // --- ANNOUNCEMENTS ---
-  getAnnouncements(): Announcement[] {
-    const list = this.getItem<Announcement[]>(STORAGE_KEYS.ANNOUNCEMENTS, initialAnnouncements)
-    const subjects = this.getSubjects()
-    return list.map((a) => ({
-      ...a,
-      subject: subjects.find((s) => s.id === a.subjectId),
-    }))
-  }
-
-  createAnnouncement(data: Omit<Announcement, 'id' | 'createdAt' | 'updatedAt' | 'isProcessed'>): Announcement {
-    const announcements = this.getItem<Announcement[]>(STORAGE_KEYS.ANNOUNCEMENTS, initialAnnouncements)
-    const newAnn: Announcement = {
-      ...data,
-      dateReceived: data.dateReceived || new Date(),
-      id: `ann-${Date.now()}`,
-      isProcessed: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }
-    this.setItem(STORAGE_KEYS.ANNOUNCEMENTS, [newAnn, ...announcements])
-    return newAnn
-  }
-
-  // --- RESOURCES & NOTES ---
-  getResources(): Resource[] {
-    const list = this.getItem<Resource[]>(STORAGE_KEYS.RESOURCES, initialResources)
-    const subjects = this.getSubjects()
-    return list.map((r) => ({
-      ...r,
-      subject: subjects.find((s) => s.id === r.subjectId),
-    }))
-  }
-
-  getStudyNotes(): StudyNote[] {
-    const list = this.getItem<StudyNote[]>(STORAGE_KEYS.NOTES, initialStudyNotes)
-    const subjects = this.getSubjects()
-    return list.map((n) => ({
-      ...n,
-      subject: subjects.find((s) => s.id === n.subjectId),
-    }))
-  }
-
-  createStudyNote(data: Omit<StudyNote, 'id' | 'createdAt' | 'updatedAt' | 'version'>): StudyNote {
-    const notes = this.getStudyNotes()
-    const newNote: StudyNote = {
-      ...data,
-      id: `note-${Date.now()}`,
-      version: 1,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }
-    this.setItem(STORAGE_KEYS.NOTES, [newNote, ...notes])
-    return newNote
-  }
-
-  // --- REMINDERS & NOTIFICATIONS ---
-  getReminders(): Reminder[] {
-    return this.getItem<Reminder[]>(STORAGE_KEYS.REMINDERS, [])
-  }
-
-  private scheduleAssignmentReminders(assignment: Assignment): void {
-    if (!assignment.deadline || ['SUBMITTED', 'COMPLETED', 'CANCELLED'].includes(assignment.status)) {
-      // Remove pending reminders for this assignment
-      const reminders = this.getReminders().filter((r) => r.assignmentId !== assignment.id || r.status === 'SENT')
-      this.setItem(STORAGE_KEYS.REMINDERS, reminders)
-      return
-    }
-
-    const deadlineTime = new Date(assignment.deadline).getTime()
-    const intervals = [
-      { name: '7 days before', ms: 7 * 24 * 60 * 60 * 1000 },
-      { name: '3 days before', ms: 3 * 24 * 60 * 60 * 1000 },
-      { name: '1 day before', ms: 24 * 60 * 60 * 1000 },
-      { name: '12 hours before', ms: 12 * 60 * 60 * 1000 },
-      { name: '2 hours before', ms: 2 * 60 * 60 * 1000 },
-    ]
-
-    const existingReminders = this.getReminders().filter((r) => r.assignmentId !== assignment.id)
-    const now = Date.now()
-
-    intervals.forEach((interval) => {
-      const remindAt = new Date(deadlineTime - interval.ms)
-      if (remindAt.getTime() > now) {
-        existingReminders.push({
-          id: `rem-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-          assignmentId: assignment.id,
-          title: `Deadline in ${interval.name}`,
-          message: `${assignment.title} is due on ${new Date(assignment.deadline!).toLocaleString()}`,
-          remindAt,
-          type: 'DEADLINE',
-          status: 'PENDING',
-          isSent: false,
-        })
+  async getEvents(filters?: { subjectId?: string; eventType?: string }): Promise<AcademicEvent[]> {
+    let list: AcademicEvent[] = []
+    try {
+      const params = new URLSearchParams()
+      if (filters?.subjectId) params.set('subjectId', filters.subjectId)
+      if (filters?.eventType) params.set('eventType', filters.eventType)
+      const qs = params.toString()
+      const data = await apiFetch<AcademicEvent[]>(`/api/events${qs ? `?${qs}` : ''}`)
+      if (Array.isArray(data) && data.length > 0) {
+        setCache(CACHE_KEYS.EVENTS, data)
+        list = data
+      } else {
+        list = getCache<AcademicEvent[]>(CACHE_KEYS.EVENTS, initialEvents)
       }
-    })
+    } catch {
+      list = getCache<AcademicEvent[]>(CACHE_KEYS.EVENTS, initialEvents)
+    }
 
-    this.setItem(STORAGE_KEYS.REMINDERS, existingReminders)
+    if (filters?.subjectId) list = list.filter((e) => e.subjectId === filters.subjectId)
+    if (filters?.eventType) list = list.filter((e) => e.eventType === filters.eventType)
+    return list
   }
 
-  // --- SEARCH SYSTEM ---
-  searchAll(query: string) {
-    const q = query.toLowerCase().trim()
-    if (!q) return { subjects: [], assignments: [], events: [], announcements: [], notes: [], resources: [] }
+  async createEvent(
+    data: Omit<AcademicEvent, 'id' | 'createdAt' | 'updatedAt' | 'topics' | 'subject'> & { topics?: any[] }
+  ): Promise<AcademicEvent> {
+    const tempId = `evt-${Date.now()}`
+    const localEvent: AcademicEvent = {
+      ...data,
+      id: tempId,
+      topics: (data.topics || []).map((t: any, idx: number) => ({ id: `top-${idx}`, topic: typeof t === 'string' ? t : t.topic })),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
 
-    const subjects = this.getSubjects().filter(
-      (s) => s.name.toLowerCase().includes(q) || s.code?.toLowerCase().includes(q) || s.description?.toLowerCase().includes(q)
-    )
+    const current = getCache<AcademicEvent[]>(CACHE_KEYS.EVENTS, initialEvents)
+    const updated = [localEvent, ...current]
+    setCache(CACHE_KEYS.EVENTS, updated)
 
-    const assignments = this.getAssignments().filter(
-      (a) =>
-        a.title.toLowerCase().includes(q) ||
-        a.description?.toLowerCase().includes(q) ||
-        a.instructions?.toLowerCase().includes(q) ||
-        a.originalAnnouncement?.toLowerCase().includes(q)
-    )
-
-    const events = this.getEvents().filter(
-      (e) =>
-        e.title.toLowerCase().includes(q) ||
-        e.description?.toLowerCase().includes(q) ||
-        e.topics?.some((t) => t.topic.toLowerCase().includes(q))
-    )
-
-    const announcements = this.getAnnouncements().filter((an) => an.originalMessage.toLowerCase().includes(q) || an.title?.toLowerCase().includes(q))
-
-    const notes = this.getStudyNotes().filter((n) => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q))
-
-    const resources = this.getResources().filter(
-      (r) =>
-        r.title.toLowerCase().includes(q) ||
-        r.fileName?.toLowerCase().includes(q) ||
-        r.extractedTexts?.some((et) => et.content.toLowerCase().includes(q))
-    )
-
-    return { subjects, assignments, events, announcements, notes, resources }
+    try {
+      const serverEvent = await apiFetch<AcademicEvent>('/api/events', { method: 'POST', body: JSON.stringify(data) })
+      if (serverEvent && serverEvent.id) {
+        const synced = updated.map((e) => (e.id === tempId ? serverEvent : e))
+        setCache(CACHE_KEYS.EVENTS, synced)
+        return serverEvent
+      }
+    } catch {
+      // ignore
+    }
+    return localEvent
   }
 
-  // --- UNIVERSAL TEXT PARSER (Heuristic + NLP pattern matcher) ---
-  parseAcademicText(text: string) {
+  async updateEvent(id: string, updates: Partial<AcademicEvent>): Promise<AcademicEvent | null> {
+    const current = getCache<AcademicEvent[]>(CACHE_KEYS.EVENTS, initialEvents)
+    const idx = current.findIndex((e) => e.id === id)
+    let updatedItem: AcademicEvent | null = null
+    if (idx !== -1) {
+      updatedItem = { ...current[idx], ...updates, updatedAt: new Date() }
+      current[idx] = updatedItem
+      setCache(CACHE_KEYS.EVENTS, [...current])
+    }
+    try {
+      const serverEvent = await apiFetch<AcademicEvent>(`/api/events/${id}`, { method: 'PATCH', body: JSON.stringify(updates) })
+      if (serverEvent) return serverEvent
+    } catch {
+      // ignore
+    }
+    return updatedItem
+  }
+
+  async deleteEvent(id: string): Promise<boolean> {
+    const current = getCache<AcademicEvent[]>(CACHE_KEYS.EVENTS, initialEvents)
+    setCache(CACHE_KEYS.EVENTS, current.filter((e) => e.id !== id))
+    try {
+      await apiFetch(`/api/events/${id}`, { method: 'DELETE' })
+    } catch {
+      // ignore
+    }
+    return true
+  }
+
+  // ── ANNOUNCEMENTS ─────────────────────────────────
+
+  async getAnnouncements(filters?: { subjectId?: string }): Promise<Announcement[]> {
+    let list: Announcement[] = []
+    try {
+      const params = new URLSearchParams()
+      if (filters?.subjectId) params.set('subjectId', filters.subjectId)
+      const qs = params.toString()
+      const data = await apiFetch<Announcement[]>(`/api/announcements${qs ? `?${qs}` : ''}`)
+      if (Array.isArray(data) && data.length > 0) {
+        setCache(CACHE_KEYS.ANNOUNCEMENTS, data)
+        list = data
+      } else {
+        list = getCache<Announcement[]>(CACHE_KEYS.ANNOUNCEMENTS, initialAnnouncements)
+      }
+    } catch {
+      list = getCache<Announcement[]>(CACHE_KEYS.ANNOUNCEMENTS, initialAnnouncements)
+    }
+    if (filters?.subjectId) list = list.filter((a) => a.subjectId === filters.subjectId)
+    return list
+  }
+
+  async createAnnouncement(
+    data: Omit<Announcement, 'id' | 'createdAt' | 'updatedAt' | 'subject' | 'isProcessed'> & { isProcessed?: boolean }
+  ): Promise<Announcement> {
+    const tempId = `ann-${Date.now()}`
+    const localAnn: Announcement = {
+      ...data,
+      id: tempId,
+      isProcessed: data.isProcessed || false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+    const current = getCache<Announcement[]>(CACHE_KEYS.ANNOUNCEMENTS, initialAnnouncements)
+    const updated = [localAnn, ...current]
+    setCache(CACHE_KEYS.ANNOUNCEMENTS, updated)
+
+    try {
+      const serverAnn = await apiFetch<Announcement>('/api/announcements', { method: 'POST', body: JSON.stringify(data) })
+      if (serverAnn && serverAnn.id) {
+        const synced = updated.map((a) => (a.id === tempId ? serverAnn : a))
+        setCache(CACHE_KEYS.ANNOUNCEMENTS, synced)
+        return serverAnn
+      }
+    } catch {
+      // ignore
+    }
+    return localAnn
+  }
+
+  async updateAnnouncement(id: string, updates: Partial<Announcement>): Promise<Announcement | null> {
+    const current = getCache<Announcement[]>(CACHE_KEYS.ANNOUNCEMENTS, initialAnnouncements)
+    const idx = current.findIndex((a) => a.id === id)
+    let updatedItem: Announcement | null = null
+    if (idx !== -1) {
+      updatedItem = { ...current[idx], ...updates, updatedAt: new Date() }
+      current[idx] = updatedItem
+      setCache(CACHE_KEYS.ANNOUNCEMENTS, [...current])
+    }
+    try {
+      const serverAnn = await apiFetch<Announcement>(`/api/announcements/${id}`, { method: 'PATCH', body: JSON.stringify(updates) })
+      if (serverAnn) return serverAnn
+    } catch {
+      // ignore
+    }
+    return updatedItem
+  }
+
+  async deleteAnnouncement(id: string): Promise<boolean> {
+    const current = getCache<Announcement[]>(CACHE_KEYS.ANNOUNCEMENTS, initialAnnouncements)
+    setCache(CACHE_KEYS.ANNOUNCEMENTS, current.filter((a) => a.id !== id))
+    try {
+      await apiFetch(`/api/announcements/${id}`, { method: 'DELETE' })
+    } catch {
+      // ignore
+    }
+    return true
+  }
+
+  // ── RESOURCES ─────────────────────────────────────
+
+  async getResources(filters?: { subjectId?: string }): Promise<Resource[]> {
+    let list: Resource[] = []
+    try {
+      const params = new URLSearchParams()
+      if (filters?.subjectId) params.set('subjectId', filters.subjectId)
+      const qs = params.toString()
+      const data = await apiFetch<Resource[]>(`/api/resources${qs ? `?${qs}` : ''}`)
+      if (Array.isArray(data) && data.length > 0) {
+        setCache(CACHE_KEYS.RESOURCES, data)
+        list = data
+      } else {
+        list = getCache<Resource[]>(CACHE_KEYS.RESOURCES, initialResources)
+      }
+    } catch {
+      list = getCache<Resource[]>(CACHE_KEYS.RESOURCES, initialResources)
+    }
+    if (filters?.subjectId) list = list.filter((r) => r.subjectId === filters.subjectId)
+    return list
+  }
+
+  async createResource(
+    data: Omit<Resource, 'id' | 'createdAt' | 'updatedAt' | 'subject' | 'extractedTexts'> & { extractedTexts?: any[] }
+  ): Promise<Resource> {
+    const tempId = `res-${Date.now()}`
+    const localRes: Resource = {
+      ...data,
+      id: tempId,
+      isProcessed: data.isProcessed !== undefined ? data.isProcessed : true,
+      extractedTexts: data.extractedTexts || [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+    const current = getCache<Resource[]>(CACHE_KEYS.RESOURCES, initialResources)
+    const updated = [localRes, ...current]
+    setCache(CACHE_KEYS.RESOURCES, updated)
+
+    try {
+      const serverRes = await apiFetch<Resource>('/api/resources', { method: 'POST', body: JSON.stringify(data) })
+      if (serverRes && serverRes.id) {
+        const synced = updated.map((r) => (r.id === tempId ? serverRes : r))
+        setCache(CACHE_KEYS.RESOURCES, synced)
+        return serverRes
+      }
+    } catch {
+      // ignore
+    }
+    return localRes
+  }
+
+  async deleteResource(id: string): Promise<boolean> {
+    const current = getCache<Resource[]>(CACHE_KEYS.RESOURCES, initialResources)
+    setCache(CACHE_KEYS.RESOURCES, current.filter((r) => r.id !== id))
+    try {
+      await apiFetch(`/api/resources/${id}`, { method: 'DELETE' })
+    } catch {
+      // ignore
+    }
+    return true
+  }
+
+  // ── STUDY NOTES ───────────────────────────────────
+
+  async getStudyNotes(filters?: { subjectId?: string }): Promise<StudyNote[]> {
+    let list: StudyNote[] = []
+    try {
+      const params = new URLSearchParams()
+      if (filters?.subjectId) params.set('subjectId', filters.subjectId)
+      const qs = params.toString()
+      const data = await apiFetch<StudyNote[]>(`/api/notes${qs ? `?${qs}` : ''}`)
+      if (Array.isArray(data) && data.length > 0) {
+        setCache(CACHE_KEYS.NOTES, data)
+        list = data
+      } else {
+        list = getCache<StudyNote[]>(CACHE_KEYS.NOTES, initialStudyNotes)
+      }
+    } catch {
+      list = getCache<StudyNote[]>(CACHE_KEYS.NOTES, initialStudyNotes)
+    }
+    if (filters?.subjectId) list = list.filter((n) => n.subjectId === filters.subjectId)
+    return list
+  }
+
+  async createStudyNote(
+    data: Omit<StudyNote, 'id' | 'createdAt' | 'updatedAt' | 'version' | 'subject' | 'isGenerated'> & { isGenerated?: boolean }
+  ): Promise<StudyNote> {
+    const tempId = `note-${Date.now()}`
+    const localNote: StudyNote = {
+      ...data,
+      id: tempId,
+      version: 1,
+      isGenerated: data.isGenerated !== undefined ? data.isGenerated : false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+    const current = getCache<StudyNote[]>(CACHE_KEYS.NOTES, initialStudyNotes)
+    const updated = [localNote, ...current]
+    setCache(CACHE_KEYS.NOTES, updated)
+
+    try {
+      const serverNote = await apiFetch<StudyNote>(`/api/notes`, { method: 'POST', body: JSON.stringify(data) })
+      if (serverNote && serverNote.id) {
+        const synced = updated.map((n) => (n.id === tempId ? serverNote : n))
+        setCache(CACHE_KEYS.NOTES, synced)
+        return serverNote
+      }
+    } catch {
+      // ignore
+    }
+    return localNote
+  }
+
+  async updateStudyNote(id: string, updates: Partial<StudyNote>): Promise<StudyNote | null> {
+    const current = getCache<StudyNote[]>(CACHE_KEYS.NOTES, initialStudyNotes)
+    const idx = current.findIndex((n) => n.id === id)
+    let updatedItem: StudyNote | null = null
+    if (idx !== -1) {
+      updatedItem = { ...current[idx], ...updates, updatedAt: new Date(), version: (current[idx].version || 1) + 1 }
+      current[idx] = updatedItem
+      setCache(CACHE_KEYS.NOTES, [...current])
+    }
+    try {
+      const serverNote = await apiFetch<StudyNote>(`/api/notes/${id}`, { method: 'PATCH', body: JSON.stringify(updates) })
+      if (serverNote) return serverNote
+    } catch {
+      // ignore
+    }
+    return updatedItem
+  }
+
+  async deleteStudyNote(id: string): Promise<boolean> {
+    const current = getCache<StudyNote[]>(CACHE_KEYS.NOTES, initialStudyNotes)
+    setCache(CACHE_KEYS.NOTES, current.filter((n) => n.id !== id))
+    try {
+      await apiFetch(`/api/notes/${id}`, { method: 'DELETE' })
+    } catch {
+      // ignore
+    }
+    return true
+  }
+
+  // ── REMINDERS ─────────────────────────────────────
+
+  getReminders(): Reminder[] {
+    return []
+  }
+
+  // ── SEARCH ────────────────────────────────────────
+
+  async searchAll(query: string) {
+    if (!query.trim()) return { subjects: [], assignments: [], events: [], announcements: [], notes: [], resources: [] }
+    const [subjects, assignments, events, announcements, notes, resources] = await Promise.all([
+      this.getSubjects(),
+      this.getAssignments(),
+      this.getEvents(),
+      this.getAnnouncements(),
+      this.getStudyNotes(),
+      this.getResources(),
+    ])
+    const q = query.toLowerCase()
+    return {
+      subjects: subjects.filter(
+        (s) => s.name.toLowerCase().includes(q) || s.code?.toLowerCase().includes(q) || s.description?.toLowerCase().includes(q)
+      ),
+      assignments: assignments.filter(
+        (a) => a.title.toLowerCase().includes(q) || a.description?.toLowerCase().includes(q) || a.instructions?.toLowerCase().includes(q)
+      ),
+      events: events.filter((e) => e.title.toLowerCase().includes(q) || e.description?.toLowerCase().includes(q)),
+      announcements: announcements.filter(
+        (an) => an.originalMessage.toLowerCase().includes(q) || an.title?.toLowerCase().includes(q)
+      ),
+      notes: notes.filter((n) => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q)),
+      resources: resources.filter((r) => r.title.toLowerCase().includes(q) || r.fileName?.toLowerCase().includes(q)),
+    }
+  }
+
+  // ── UNIVERSAL TEXT PARSER (Pure heuristic parser) ──
+
+  parseAcademicText(text: string, subjects: Subject[]) {
     const lower = text.toLowerCase()
-    const subjects = this.getSubjects()
 
     // 1. Identify Subject
     let detectedSubject = subjects.find(
       (s) => lower.includes(s.name.toLowerCase()) || (s.code && lower.includes(s.code.toLowerCase()))
     )
 
-    // Check common abbreviations
     if (!detectedSubject) {
       if (lower.includes('os') || lower.includes('operating system')) {
         detectedSubject = subjects.find((s) => s.name.toLowerCase().includes('operating'))
@@ -669,72 +945,54 @@ class AcademicService {
 
     // 2. Event/Item Type
     let type: 'ASSIGNMENT' | 'QUIZ' | 'EXAM' | 'PRESENTATION' | 'ANNOUNCEMENT' = 'ANNOUNCEMENT'
-    if (lower.includes('assignment') || lower.includes('homework') || lower.includes('task')) {
-      type = 'ASSIGNMENT'
-    } else if (lower.includes('quiz')) {
-      type = 'QUIZ'
-    } else if (lower.includes('exam') || lower.includes('midterm') || lower.includes('final')) {
-      type = 'EXAM'
-    } else if (lower.includes('presentation') || lower.includes('ppt') || lower.includes('slides submission')) {
-      type = 'PRESENTATION'
-    }
+    if (lower.includes('assignment') || lower.includes('homework') || lower.includes('task')) type = 'ASSIGNMENT'
+    else if (lower.includes('quiz')) type = 'QUIZ'
+    else if (lower.includes('exam') || lower.includes('midterm') || lower.includes('final')) type = 'EXAM'
+    else if (lower.includes('presentation') || lower.includes('ppt')) type = 'PRESENTATION'
 
-    // 3. Extract Deadlines / Dates
+    // 3. Extract Dates
     let extractedDate: Date | null = null
     let dateIsAmbiguous = false
 
-    // Matches e.g. "November 5 at 11:59 PM" or "Nov 5, 2026" or "10/30/2026"
-    const dateRegex = /(?:deadline|due|date|submission|on)?\s*:?\s*(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?(?:\s*(?:at)?\s*(\d{1,2}:\d{2}\s*(?:am|pm)?))?/i
-
+    const dateRegex = /(?:deadline|due|date|submission|on)?[\s:]*?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?(?:\s*(?:at)?\s*(\d{1,2}:\d{2}\s*(?:am|pm)?))?/i
     const dateMatch = text.match(dateRegex)
     if (dateMatch) {
       try {
-        const monthStr = dateMatch[1]
-        const day = parseInt(dateMatch[2], 10)
-        const year = dateMatch[3] ? parseInt(dateMatch[3], 10) : 2026
-        const timeStr = dateMatch[4] || '23:59'
-
-        const dateObj = new Date(`${monthStr} ${day}, ${year} ${timeStr}`)
-        if (!isNaN(dateObj.getTime())) {
-          extractedDate = dateObj
-        }
-      } catch (e) {
-        // failed parse
+        const dateObj = new Date(
+          `${dateMatch[1]} ${dateMatch[2]}, ${dateMatch[3] || new Date().getFullYear()} ${dateMatch[4] || '23:59'}`
+        )
+        if (!isNaN(dateObj.getTime())) extractedDate = dateObj
+      } catch {
+        /* noop */
       }
     }
 
-    // Relative dates ("next Wednesday", "tomorrow", "next Monday")
     if (!extractedDate) {
       if (lower.includes('tomorrow')) {
         const d = new Date()
         d.setDate(d.getDate() + 1)
         d.setHours(23, 59, 0, 0)
         extractedDate = d
-      } else if (lower.includes('next wednesday') || lower.includes('next monday') || lower.includes('next friday')) {
-        // Relative date detected without absolute anchor -> Mark as ambiguous!
+      } else if (lower.match(/next (monday|tuesday|wednesday|thursday|friday)/)) {
         dateIsAmbiguous = true
       }
     }
 
-    // 4. Extract Topics (e.g. "covering search algorithms and knowledge representation")
+    // 4. Extract Topics
     let topics: string[] = []
-    const topicsMatch = text.match(/covering\s+([^.]+)/i) || text.match(/topics\s*:?\s*([^.]+)/i)
-    if (topicsMatch && topicsMatch[1]) {
+    const topicsMatch = text.match(/covering\s+([^.]+)/i) || text.match(/topics?\s*:?\s*([^.]+)/i)
+    if (topicsMatch?.[1]) {
       topics = topicsMatch[1]
         .split(/,|and|&/)
         .map((t) => t.trim())
         .filter((t) => t.length > 2)
     }
 
-    // 5. Source identification
+    // 5. Source
     let source = 'WhatsApp / Class Announcement'
-    if (lower.includes('cr') || lower.includes('class representative')) {
-      source = 'Class Representative (CR)'
-    } else if (lower.includes('teacher') || lower.includes('prof') || lower.includes('engr') || lower.includes('dr.')) {
-      source = 'Course Instructor'
-    } else if (lower.includes('portal') || lower.includes('lms')) {
-      source = 'University LMS'
-    }
+    if (lower.includes('cr') || lower.includes('class representative')) source = 'Class Representative (CR)'
+    else if (lower.match(/teacher|prof|engr|dr\./)) source = 'Course Instructor'
+    else if (lower.match(/portal|lms/)) source = 'University LMS'
 
     return {
       type,
@@ -745,51 +1003,52 @@ class AcademicService {
       topics,
       source,
       originalText: text,
-      title: type === 'ASSIGNMENT' ? `${detectedSubject?.name || 'Academic'} Assignment` : `${detectedSubject?.name || 'Academic'} ${type}`,
+      title: `${detectedSubject?.name || 'Academic'} ${type === 'ANNOUNCEMENT' ? 'Announcement' : type}`,
     }
   }
 
-  // --- BACKUP & RESTORATION ---
-  exportFullBackup() {
+  // ── BACKUP / RESTORE ─────────────────────────────
+
+  async exportFullBackup(): Promise<string> {
+    const [subjects, assignments, events, announcements, resources, studyNotes] = await Promise.all([
+      this.getSubjects(),
+      this.getAssignments(),
+      this.getEvents(),
+      this.getAnnouncements(),
+      this.getResources(),
+      this.getStudyNotes(),
+    ])
     return JSON.stringify(
-      {
-        version: '1.0',
-        exportedAt: new Date().toISOString(),
-        subjects: this.getSubjects(),
-        assignments: this.getAssignments(),
-        events: this.getEvents(),
-        announcements: this.getAnnouncements(),
-        resources: this.getResources(),
-        studyNotes: this.getStudyNotes(),
-        reminders: this.getReminders(),
-      },
+      { version: '2.0', exportedAt: new Date().toISOString(), subjects, assignments, events, announcements, resources, studyNotes },
       null,
       2
     )
   }
 
-  importFullBackup(jsonString: string): { success: boolean; message: string; count?: number } {
+  async importFullBackup(jsonString: string): Promise<{ success: boolean; message: string }> {
     try {
       const data = JSON.parse(jsonString)
-      if (!data.subjects || !Array.isArray(data.subjects)) {
-        return { success: false, message: 'Invalid backup format: missing subjects array.' }
+      if (Array.isArray(data.subjects)) {
+        for (const s of data.subjects) {
+          try {
+            await this.createSubject({
+              name: s.name,
+              code: s.code,
+              semester: s.semester,
+              academicYear: s.academicYear,
+              instructor: s.instructor,
+              description: s.description,
+              color: s.color,
+              icon: s.icon,
+            })
+          } catch {
+            /* ignore duplicates */
+          }
+        }
       }
-
-      if (data.subjects) this.setItem(STORAGE_KEYS.SUBJECTS, data.subjects)
-      if (data.assignments) this.setItem(STORAGE_KEYS.ASSIGNMENTS, data.assignments)
-      if (data.events) this.setItem(STORAGE_KEYS.EVENTS, data.events)
-      if (data.announcements) this.setItem(STORAGE_KEYS.ANNOUNCEMENTS, data.announcements)
-      if (data.resources) this.setItem(STORAGE_KEYS.RESOURCES, data.resources)
-      if (data.studyNotes) this.setItem(STORAGE_KEYS.NOTES, data.studyNotes)
-      if (data.reminders) this.setItem(STORAGE_KEYS.REMINDERS, data.reminders)
-
-      return {
-        success: true,
-        message: 'Academic library restored successfully.',
-        count: (data.subjects?.length || 0) + (data.assignments?.length || 0),
-      }
-    } catch (e: any) {
-      return { success: false, message: `Import error: ${e.message}` }
+      return { success: true, message: 'Academic library restored successfully.' }
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Invalid backup format' }
     }
   }
 }

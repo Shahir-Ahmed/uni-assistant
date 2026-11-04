@@ -26,8 +26,19 @@ export default function CalendarPage() {
   const [viewMode, setViewMode] = React.useState<"MONTH" | "LIST">("MONTH")
 
   React.useEffect(() => {
-    setAssignments(academicService.getAssignments())
-    setEvents(academicService.getEvents())
+    async function load() {
+      try {
+        const [asgs, evts] = await Promise.all([
+          academicService.getAssignments(),
+          academicService.getEvents(),
+        ])
+        setAssignments(asgs)
+        setEvents(evts)
+      } catch (err) {
+        console.error('Failed to load calendar data:', err)
+      }
+    }
+    load()
   }, [])
 
   // Month navigation

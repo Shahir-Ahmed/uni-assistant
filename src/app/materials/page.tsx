@@ -61,10 +61,19 @@ export default function MaterialsPage() {
   const [noteFormat, setNoteFormat] = React.useState<NoteType>("DETAILED")
   const [isGenerating, setIsGenerating] = React.useState(false)
 
-  const loadData = React.useCallback(() => {
-    setResources(academicService.getResources())
-    setSubjects(academicService.getSubjects())
-    setStudyNotes(academicService.getStudyNotes())
+  const loadData = React.useCallback(async () => {
+    try {
+      const [r, s, n] = await Promise.all([
+        academicService.getResources(),
+        academicService.getSubjects(),
+        academicService.getStudyNotes(),
+      ])
+      setResources(r)
+      setSubjects(s)
+      setStudyNotes(n)
+    } catch (err) {
+      console.error('Failed to load materials data:', err)
+    }
   }, [])
 
   React.useEffect(() => {
@@ -80,7 +89,7 @@ export default function MaterialsPage() {
     setUploadOpen(true)
   }
 
-  const handleSaveUpload = () => {
+  const handleSaveUpload = async () => {
     if (!title.trim() || !subjectId) return
 
     // Simulate OCR and document extraction
@@ -89,8 +98,7 @@ export default function MaterialsPage() {
       { id: `et-2-${Date.now()}`, slideNumber: 2, content: sampleContent.slice(120) || 'Detailed worked algorithms and formulas.' },
     ]
 
-    const newRes: Resource = {
-      id: `res-${Date.now()}`,
+    await academicService.createResource({
       title: title.trim(),
       subjectId,
       resourceType: "PDF",
@@ -98,15 +106,11 @@ export default function MaterialsPage() {
       category: category as any,
       isProcessed: true,
       processingStatus: "completed",
-      createdAt: new Date(),
-      updatedAt: new Date(),
       extractedTexts: mockExtracted,
-    }
+    })
 
-    const current = academicService.getResources()
-    localStorage.setItem("scholaros_resources_v1", JSON.stringify([newRes, ...current]))
     setUploadOpen(false)
-    loadData()
+    await loadData()
   }
 
   const handleTriggerGenerate = (res: Resource) => {
@@ -114,14 +118,13 @@ export default function MaterialsPage() {
     setGenerateModalOpen(true)
   }
 
-  const handleGenerateConfirm = () => {
+  const handleGenerateConfirm = async () => {
     if (!selectedResource) return
     setIsGenerating(true)
 
-    setTimeout(() => {
-      let content = ""
-      if (noteFormat === "DETAILED") {
-        content = `# Beginner-Friendly Notes: ${selectedResource.title}
+    let content = ""
+    if (noteFormat === "DETAILED") {
+      content = `# Beginner-Friendly Notes: ${selectedResource.title}
 
 ## 1. Core Concept Overview
 The uploaded lecture slides cover fundamental principles designed for clear understanding from first principles.
@@ -142,19 +145,20 @@ Imagine an airport air traffic control tower prioritizing airplanes landing on a
 1. What are the four essential conditions that cause a deadlock?
 2. Compare preemptive versus non-preemptive scheduling with an example.
 `
-      } else if (noteFormat === "REVISION") {
-        content = `# Quick Revision Sheet: ${selectedResource.title}
+    } else if (noteFormat === "REVISION") {
+      content = `# Quick Revision Sheet: ${selectedResource.title}
 * **Core Definition:** High-priority principles for exam quick review.
 * **Essential Formulas:** Total Execution Time = Waiting Time + Service Time.
 * **Common Pitfalls:** Do not confuse deadlock avoidance with deadlock detection!
 `
-      } else {
-        content = `# ${noteFormat} Guide: ${selectedResource.title}
+    } else {
+      content = `# ${noteFormat} Guide: ${selectedResource.title}
 Key takeaways systematically organized from ${selectedResource.fileName}.
 `
-      }
+    }
 
-      academicService.createStudyNote({
+    try {
+      await academicService.createStudyNote({
         title: `${noteFormat.replace(/_/g, " ")}: ${selectedResource.title}`,
         subjectId: selectedResource.subjectId,
         content,
@@ -162,11 +166,13 @@ Key takeaways systematically organized from ${selectedResource.fileName}.
         sourceResourceId: selectedResource.id,
         isGenerated: true,
       })
-
+      await loadData()
+    } catch (err) {
+      console.error('Failed to create study note:', err)
+    } finally {
       setIsGenerating(false)
       setGenerateModalOpen(false)
-      loadData()
-    }, 400)
+    }
   }
 
   const filtered = resources.filter((r) => {

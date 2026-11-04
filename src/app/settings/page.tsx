@@ -37,20 +37,24 @@ export default function SettingsPage() {
   const [offlineOnly, setOfflineOnly] = React.useState(true)
   const [statusMessage, setStatusMessage] = React.useState("")
 
-  const handleExportBackup = () => {
-    const jsonStr = academicService.exportFullBackup()
-    const blob = new Blob([jsonStr], { type: "application/json" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `scholaros-backup-${new Date().toISOString().slice(0, 10)}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+  const handleExportBackup = async () => {
+    try {
+      const jsonStr = await academicService.exportFullBackup()
+      const blob = new Blob([jsonStr], { type: "application/json" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `scholaros-backup-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
 
-    setStatusMessage("Full JSON backup exported successfully.")
-    setTimeout(() => setStatusMessage(""), 4000)
+      setStatusMessage("Full JSON backup exported successfully.")
+      setTimeout(() => setStatusMessage(""), 4000)
+    } catch (err) {
+      console.error('Export error:', err)
+    }
   }
 
   const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -58,10 +62,10 @@ export default function SettingsPage() {
     if (!file) return
 
     const reader = new FileReader()
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const text = event.target?.result as string
       if (text) {
-        const result = academicService.importFullBackup(text)
+        const result = await academicService.importFullBackup(text)
         if (result.success) {
           setStatusMessage("Academic library restored successfully!")
           setTimeout(() => {

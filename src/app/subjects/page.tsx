@@ -53,6 +53,8 @@ export default function SubjectsPage() {
   const [subjects, setSubjects] = React.useState<Subject[]>([])
   const [searchQuery, setSearchQuery] = React.useState("")
   const [filterArchived, setFilterArchived] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
+  const [saving, setSaving] = React.useState(false)
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = React.useState(false)
@@ -67,8 +69,16 @@ export default function SubjectsPage() {
   const [description, setDescription] = React.useState("")
   const [color, setColor] = React.useState(PRESET_COLORS[0])
 
-  const loadSubjects = React.useCallback(() => {
-    setSubjects(academicService.getSubjects())
+  const loadSubjects = React.useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await academicService.getSubjects()
+      setSubjects(data)
+    } catch (err) {
+      console.error('Failed to load subjects:', err)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   React.useEffect(() => {
@@ -99,44 +109,49 @@ export default function SubjectsPage() {
     setDialogOpen(true)
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name.trim()) return
-
-    if (editingSubject) {
-      academicService.updateSubject(editingSubject.id, {
-        name: name.trim(),
-        code: code.trim() || null,
-        semester: semester.trim() || null,
-        academicYear: academicYear.trim() || null,
-        instructor: instructor.trim() || null,
-        description: description.trim() || null,
-        color,
-      })
-    } else {
-      academicService.createSubject({
-        name: name.trim(),
-        code: code.trim() || null,
-        semester: semester.trim() || null,
-        academicYear: academicYear.trim() || null,
-        instructor: instructor.trim() || null,
-        description: description.trim() || null,
-        color,
-      })
+    setSaving(true)
+    try {
+      if (editingSubject) {
+        await academicService.updateSubject(editingSubject.id, {
+          name: name.trim(),
+          code: code.trim() || undefined,
+          semester: semester.trim() || undefined,
+          academicYear: academicYear.trim() || undefined,
+          instructor: instructor.trim() || undefined,
+          description: description.trim() || undefined,
+          color,
+        })
+      } else {
+        await academicService.createSubject({
+          name: name.trim(),
+          code: code.trim() || undefined,
+          semester: semester.trim() || undefined,
+          academicYear: academicYear.trim() || undefined,
+          instructor: instructor.trim() || undefined,
+          description: description.trim() || undefined,
+          color,
+        })
+      }
+      setDialogOpen(false)
+      await loadSubjects()
+    } catch (err: any) {
+      alert(err.message || 'Failed to save subject')
+    } finally {
+      setSaving(false)
     }
-
-    setDialogOpen(false)
-    loadSubjects()
   }
 
-  const handleToggleArchive = (subject: Subject) => {
-    academicService.updateSubject(subject.id, { isArchived: !subject.isArchived })
-    loadSubjects()
+  const handleToggleArchive = async (subject: Subject) => {
+    await academicService.updateSubject(subject.id, { isArchived: !subject.isArchived })
+    await loadSubjects()
   }
 
-  const handleDelete = (id: string) => {
-    if (confirm("Are you sure you want to delete this subject?")) {
-      academicService.deleteSubject(id)
-      loadSubjects()
+  const handleDelete = async (id: string) => {
+    if (confirm("Are you sure you want to delete this subject? All related data will be deleted.")) {
+      await academicService.deleteSubject(id)
+      await loadSubjects()
     }
   }
 
@@ -197,7 +212,21 @@ export default function SubjectsPage() {
       </div>
 
       {/* Subjects Grid */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {[1,2,3].map(i => (
+            <div key={i} className="rounded-xl border border-border bg-white dark:bg-card shadow-sm overflow-hidden animate-pulse">
+              <div className="h-2.5 w-full bg-gray-200 dark:bg-gray-700" />
+              <div className="p-5 space-y-3">
+                <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/3" />
+                <div className="h-5 bg-gray-200 dark:bg-gray-700 rounded w-3/4" />
+                <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-full" />
+                <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-2/3" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="text-center py-12 border border-dashed rounded-xl p-8 bg-gray-50/50 dark:bg-card/50">
           <BookOpen className="h-10 w-10 text-muted-foreground mx-auto mb-3 opacity-60" />
           <h3 className="font-semibold text-gray-800 dark:text-gray-200">No subjects found</h3>
@@ -371,15 +400,15 @@ export default function SubjectsPage() {
           </div>
 
           <DialogFooter className="pt-2">
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
               Cancel
             </Button>
             <Button
               onClick={handleSave}
-              disabled={!name.trim()}
+              disabled={!name.trim() || saving}
               className="bg-primary hover:bg-primary-700 text-white font-semibold"
             >
-              {editingSubject ? "Save Changes" : "Create Subject"}
+              {saving ? 'Saving…' : editingSubject ? 'Save Changes' : 'Create Subject'}
             </Button>
           </DialogFooter>
         </DialogContent>

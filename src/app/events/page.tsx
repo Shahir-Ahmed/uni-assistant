@@ -56,9 +56,17 @@ export default function EventsPage() {
   const [topicsInput, setTopicsInput] = React.useState("")
   const [priority, setPriority] = React.useState<Priority>("HIGH")
 
-  const loadData = React.useCallback(() => {
-    setEvents(academicService.getEvents())
-    setSubjects(academicService.getSubjects())
+  const loadData = React.useCallback(async () => {
+    try {
+      const [evts, subs] = await Promise.all([
+        academicService.getEvents(),
+        academicService.getSubjects(),
+      ])
+      setEvents(evts)
+      setSubjects(subs)
+    } catch (err) {
+      console.error('Failed to load events:', err)
+    }
   }, [])
 
   React.useEffect(() => {
@@ -79,7 +87,7 @@ export default function EventsPage() {
     setDialogOpen(true)
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!title.trim() || !subjectId) return
 
     const topicList = topicsInput
@@ -88,7 +96,7 @@ export default function EventsPage() {
       .filter((t) => t.length > 0)
       .map((t, idx) => ({ id: `top-${Date.now()}-${idx}`, topic: t }))
 
-    academicService.createEvent({
+    await academicService.createEvent({
       title: title.trim(),
       subjectId,
       eventType,
@@ -96,14 +104,14 @@ export default function EventsPage() {
       startTime,
       endTime,
       location,
-      description: description.trim() || null,
+      description: description.trim() || undefined,
       priority,
       status: "UPCOMING",
       topics: topicList,
     })
 
     setDialogOpen(false)
-    loadData()
+    await loadData()
   }
 
   return (

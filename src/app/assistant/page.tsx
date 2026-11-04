@@ -66,7 +66,7 @@ Here are a few things you can ask me:
     }
   }, [prepQuery, subjectQuery])
 
-  const handleUserSubmit = (userText: string) => {
+  const handleUserSubmit = async (userText: string) => {
     const text = userText.trim()
     if (!text) return
 
@@ -81,9 +81,8 @@ Here are a few things you can ask me:
     setInput("")
     setIsTyping(true)
 
-    // Process Query against academic database & NLP logic
-    setTimeout(() => {
-      const response = processAcademicCommand(text)
+    try {
+      const response = await processAcademicCommand(text)
       setMessages((prev) => [
         ...prev,
         {
@@ -102,20 +101,22 @@ Here are a few things you can ask me:
         setScore(0)
         setQuizActive(true)
       }
-
+    } catch (err) {
+      console.error('Failed to process assistant command:', err)
+    } finally {
       setIsTyping(false)
-    }, 400)
+    }
   }
 
   // Controlled Database Execution & NLP Engine
-  const processAcademicCommand = (
+  const processAcademicCommand = async (
     text: string
-  ): { reply: string; quizQuestions?: QuizQuestion[] } => {
+  ): Promise<{ reply: string; quizQuestions?: QuizQuestion[] }> => {
     const lower = text.toLowerCase()
 
     // 1. "What assignments do I have this week?" or "List assignments"
     if (lower.includes("assignment") && (lower.includes("what") || lower.includes("list") || lower.includes("show") || lower.includes("week"))) {
-      const assignments = academicService.getAssignments()
+      const assignments = await academicService.getAssignments()
       const active = assignments.filter((a) => !['COMPLETED', 'SUBMITTED', 'CANCELLED'].includes(a.status))
 
       if (active.length === 0) {
@@ -136,14 +137,14 @@ Here are a few things you can ask me:
 
     // 2. "When is my next quiz?"
     if (lower.includes("next quiz") || lower.includes("quiz") || lower.includes("exam")) {
-      const events = academicService.getEvents().filter((e) => e.status === "UPCOMING")
+      const events = (await academicService.getEvents()).filter((e) => e.status === "UPCOMING")
 
       if (events.length === 0) {
         return { reply: "You don't have any upcoming quizzes or exams scheduled right now." }
       }
 
       const next = events[0]
-      const topicsList = next.topics.map((t) => `  * ${t.topic}`).join("\n")
+      const topicsList = (next.topics || []).map((t: any) => `  * ${t.topic || t}`).join("\n")
 
       return {
         reply: `Your next assessment is **${next.title}** for **${next.subject?.name || "Subject"}**.\n\n* **Scheduled Date:** ${next.date ? new Date(next.date).toLocaleDateString() : "TBD"} at ${next.startTime || "TBD"}\n* **Location:** ${next.location || "Classroom"}\n* **Syllabus Topics Covered:**\n${topicsList}\n\nWould you like to start an **interactive practice quiz session** right now to test your understanding?`,
@@ -152,9 +153,10 @@ Here are a few things you can ask me:
 
     // 3. Command: "Create assignment"
     if (lower.startsWith("create an assignment") || lower.startsWith("create assignment") || lower.startsWith("add assignment")) {
-      const parsed = academicService.parseAcademicText(text)
+      const subjects = await academicService.getSubjects()
+      const parsed = academicService.parseAcademicText(text, subjects)
       if (parsed.subjectId) {
-        const asg = academicService.createAssignment({
+        const asg = await academicService.createAssignment({
           subjectId: parsed.subjectId,
           title: parsed.title,
           description: text,
@@ -167,7 +169,7 @@ Here are a few things you can ask me:
         })
 
         return {
-          reply: `✅ **Assignment Successfully Created in Database!**\n\n* **Title:** ${asg.title}\n* **Subject:** ${asg.subject?.name}\n* **Deadline:** ${asg.deadline ? new Date(asg.deadline).toLocaleString() : "Confirmed needed"}\n* **Audit:** Reminders scheduled automatically at 7d, 3d, 1d, and 2h before deadline.`,
+          reply: `✅ **Assignment Successfully Created in Database!**\n\n* **Title:** ${asg.title}\n* **Subject:** ${asg.subject?.name || parsed.subjectName || 'Assigned'}\n* **Deadline:** ${asg.deadline ? new Date(asg.deadline).toLocaleString() : "Confirmation needed"}\n* **Audit:** Saved to PostgreSQL database.`,
         }
       }
     }
