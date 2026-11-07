@@ -10,6 +10,8 @@ import {
   Sparkles,
   ArrowRight,
   Filter,
+  Upload,
+  Plus,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -17,33 +19,96 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { academicService } from "@/lib/academic-service"
 import { Announcement } from "@/types"
 import { formatRelativeDate } from "@/lib/utils"
+import { UnifiedFileInput, FileAttachment } from "@/components/ui/file-input"
 
 export default function InboxPage() {
   const [announcements, setAnnouncements] = React.useState<Announcement[]>([])
+  const [attachment, setAttachment] = React.useState<FileAttachment | null>(null)
+  const [showUploader, setShowUploader] = React.useState(false)
+  const [isProcessing, setIsProcessing] = React.useState(false)
+
+  const loadData = React.useCallback(async () => {
+    try {
+      const data = await academicService.getAnnouncements()
+      setAnnouncements(data)
+    } catch (err) {
+      console.error("Failed to load announcements:", err)
+    }
+  }, [])
 
   React.useEffect(() => {
-    async function load() {
-      try {
-        const data = await academicService.getAnnouncements()
-        setAnnouncements(data)
-      } catch (err) {
-        console.error('Failed to load announcements:', err)
-      }
+    loadData()
+  }, [loadData])
+
+  const handleCaptureAttachment = async (att: FileAttachment) => {
+    setIsProcessing(true)
+    try {
+      const text =
+        att.extractedText && att.extractedText.length > 20
+          ? att.extractedText
+          : `Announcement document: ${att.fileName} (${att.fileUrl || "Uploaded attachment"})`
+
+      await academicService.createAnnouncement({
+        title: att.fileName.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "),
+        originalMessage: text,
+        category: "GENERAL",
+        source: att.type === "URL" ? "Portal Link" : "Uploaded Document",
+        isProcessed: false,
+      })
+      setAttachment(null)
+      setShowUploader(false)
+      await loadData()
+    } catch (err) {
+      console.error("Failed to capture announcement:", err)
+    } finally {
+      setIsProcessing(false)
     }
-    load()
-  }, [])
+  }
 
   return (
     <div className="space-y-6 pb-12 max-w-4xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 flex items-center gap-2">
-          <InboxIcon className="h-6 w-6 text-primary" />
-          <span>Capture Inbox & Review Queue</span>
-        </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Newly captured messages from WhatsApp, CR announcements, and automated extractions
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 flex items-center gap-2">
+            <InboxIcon className="h-6 w-6 text-primary" />
+            <span>Capture Inbox & Review Queue</span>
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Newly captured messages from WhatsApp, CR announcements, documents, and portal links
+          </p>
+        </div>
+
+        <Button
+          onClick={() => setShowUploader((prev) => !prev)}
+          size="sm"
+          className="bg-primary hover:bg-primary-700 text-white text-xs font-semibold gap-1.5 shadow-sm"
+        >
+          <Upload className="h-3.5 w-3.5" />
+          <span>{showUploader ? "Hide Attachment Box" : "Drop File or Link"}</span>
+        </Button>
       </div>
+
+      {/* Drop announcement file or URL */}
+      {showUploader && (
+        <Card className="border border-primary/30 bg-primary/5 dark:bg-card shadow-sm animate-fade-in">
+          <CardContent className="p-4 space-y-3">
+            <UnifiedFileInput
+              value={attachment}
+              onChange={(att) => {
+                setAttachment(att)
+                if (att) handleCaptureAttachment(att)
+              }}
+              label="Drop Announcement File or Paste Web Link"
+              description="Drop an announcement screenshot, PDF notice, or enter a university portal link to index."
+            />
+            {isProcessing && (
+              <p className="text-xs text-primary font-semibold animate-pulse">
+                Processing and adding to inbox...
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="space-y-3">
         {announcements.length === 0 ? (
@@ -77,8 +142,14 @@ export default function InboxPage() {
                   <span className="text-[11px] text-muted-foreground">
                     {formatRelativeDate(ann.dateReceived)}
                   </span>
-                  <Badge className="bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300 text-[10px] font-bold">
-                    Organized
+                  <Badge
+                    className={`text-[10px] font-bold ${
+                      ann.isProcessed
+                        ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300"
+                        : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                    }`}
+                  >
+                    {ann.isProcessed ? "Organized" : "Pending Review"}
                   </Badge>
                 </div>
               </div>
@@ -88,7 +159,12 @@ export default function InboxPage() {
               </div>
 
               <div className="pt-2 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Associated Subject: <span className="font-bold text-gray-800 dark:text-gray-200">{ann.subject?.name || "Unassigned"}</span></span>
+                <span>
+                  Associated Subject:{" "}
+                  <span className="font-bold text-gray-800 dark:text-gray-200">
+                    {ann.subject?.name || "Unassigned"}
+                  </span>
+                </span>
                 <Link href={`/assistant?prep=${encodeURIComponent(ann.originalMessage.slice(0, 30))}`}>
                   <Button size="sm" variant="ghost" className="text-xs text-primary font-semibold gap-1">
                     <span>Ask AI About This</span>

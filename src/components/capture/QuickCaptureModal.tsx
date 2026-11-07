@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge"
 import { academicService } from "@/lib/academic-service"
 import { Subject, AssignmentStatus, Priority } from "@/types"
 import { Sparkles, Calendar, Clock, AlertCircle, CheckCircle2, ArrowRight } from "lucide-react"
+import { UnifiedFileInput, FileAttachment } from "@/components/ui/file-input"
 
 interface QuickCaptureModalProps {
   open: boolean
@@ -34,6 +35,7 @@ interface QuickCaptureModalProps {
 export function QuickCaptureModal({ open, onOpenChange, onSuccess }: QuickCaptureModalProps) {
   const [subjects, setSubjects] = React.useState<Subject[]>([])
   const [rawText, setRawText] = React.useState("")
+  const [attachment, setAttachment] = React.useState<FileAttachment | null>(null)
   const [isAnalyzing, setIsAnalyzing] = React.useState(false)
   const [step, setStep] = React.useState<"INPUT" | "REVIEW">("INPUT")
 
@@ -52,6 +54,7 @@ export function QuickCaptureModal({ open, onOpenChange, onSuccess }: QuickCaptur
       academicService.getSubjects().then((subs) => setSubjects(subs)).catch(console.error)
       setStep("INPUT")
       setRawText("")
+      setAttachment(null)
     }
   }, [open])
 
@@ -105,6 +108,7 @@ export function QuickCaptureModal({ open, onOpenChange, onSuccess }: QuickCaptur
           originalAnnouncement: rawText.trim(),
           deadline: deadline ? new Date(deadline) : null,
           deadlineConfirmed: !isAmbiguousDate && !!deadline,
+          submissionLink: attachment?.fileUrl || undefined,
           priority,
           status: "NOT_STARTED",
           sortOrder: 0,
@@ -154,6 +158,24 @@ export function QuickCaptureModal({ open, onOpenChange, onSuccess }: QuickCaptur
 
         {step === "INPUT" ? (
           <div className="space-y-4 py-2">
+            {/* Universal File / URL Attachment */}
+            <UnifiedFileInput
+              value={attachment}
+              onChange={(att) => {
+                setAttachment(att)
+                if (att) {
+                  if (att.extractedText && att.extractedText.length > 15) {
+                    setRawText(att.extractedText)
+                  } else {
+                    setRawText(`Academic announcement regarding ${att.fileName}: ${att.fileUrl || ""}`)
+                  }
+                  if (att.type === "URL") setSource("Web Portal")
+                }
+              }}
+              label="Attach Announcement Document, Image, or URL"
+              description="Upload screenshots, assignment PDFs, or paste portal links to automatically extract deadlines."
+            />
+
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1 block">
                 Announcement or Academic Text
@@ -161,7 +183,7 @@ export function QuickCaptureModal({ open, onOpenChange, onSuccess }: QuickCaptur
               <Textarea
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
-                rows={6}
+                rows={5}
                 placeholder="Example: Database Systems assignment 2: Prepare an ER diagram and relational schema. Submission deadline is November 5 at 11:59 PM. The assignment was announced by our CR today."
                 className="font-sans text-sm focus-visible:ring-primary leading-relaxed"
               />

@@ -43,6 +43,7 @@ import { Badge } from "@/components/ui/badge"
 import { academicService } from "@/lib/academic-service"
 import { Assignment, Subject, AssignmentStatus, Priority } from "@/types"
 import { formatDate, formatDateTime, formatRelativeDate, getPriorityColor, getStatusColor, isOverdue } from "@/lib/utils"
+import { UnifiedFileInput, FileAttachment } from "@/components/ui/file-input"
 
 export default function AssignmentsPage() {
   const [assignments, setAssignments] = React.useState<Assignment[]>([])
@@ -68,6 +69,7 @@ export default function AssignmentsPage() {
   const [status, setStatus] = React.useState<AssignmentStatus>("NOT_STARTED")
   const [submissionMethod, setSubmissionMethod] = React.useState("")
   const [submissionLink, setSubmissionLink] = React.useState("")
+  const [attachment, setAttachment] = React.useState<FileAttachment | null>(null)
   const [estimatedEffort, setEstimatedEffort] = React.useState("")
   const [personalNotes, setPersonalNotes] = React.useState("")
   const [changeReason, setChangeReason] = React.useState("")
@@ -100,6 +102,7 @@ export default function AssignmentsPage() {
     setStatus("NOT_STARTED")
     setSubmissionMethod("University Portal")
     setSubmissionLink("")
+    setAttachment(null)
     setEstimatedEffort("4-6 hours")
     setPersonalNotes("")
     setChangeReason("")
@@ -123,6 +126,15 @@ export default function AssignmentsPage() {
     setStatus(asg.status)
     setSubmissionMethod(asg.submissionMethod || "")
     setSubmissionLink(asg.submissionLink || "")
+    if (asg.submissionLink) {
+      setAttachment({
+        type: asg.submissionLink.startsWith("http") ? "URL" : "FILE",
+        fileName: asg.submissionLink.split("/").pop() || "Attached File",
+        fileUrl: asg.submissionLink,
+      })
+    } else {
+      setAttachment(null)
+    }
     setEstimatedEffort(asg.estimatedEffort || "")
     setPersonalNotes(asg.personalNotes || "")
     setChangeReason("")
@@ -418,6 +430,20 @@ export default function AssignmentsPage() {
                       {asg.estimatedEffort && <span>• Est. Effort: {asg.estimatedEffort}</span>}
                     </div>
 
+                    {asg.submissionLink && (
+                      <div className="pt-1 flex items-center gap-1.5">
+                        <a
+                          href={asg.submissionLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] text-primary font-semibold hover:underline"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          <span>Attached Document / Link</span>
+                        </a>
+                      </div>
+                    )}
+
                     {asg.originalAnnouncement && (
                       <div className="mt-2 p-2 bg-gray-50 dark:bg-card border border-border rounded text-[11px] text-muted-foreground italic">
                         Preserved Announcement: &ldquo;{asg.originalAnnouncement}&rdquo;
@@ -581,6 +607,22 @@ export default function AssignmentsPage() {
                 className="mt-1 text-xs"
               />
             </div>
+
+            {/* Universal File / Link Attachment */}
+            <UnifiedFileInput
+              value={attachment}
+              onChange={(att) => {
+                setAttachment(att)
+                if (att?.fileUrl) {
+                  setSubmissionLink(att.fileUrl)
+                } else if (!att) {
+                  setSubmissionLink("")
+                }
+              }}
+              label="Assignment Problem Sheet or Portal Link"
+              description="Attach problem brief PDF, instructions, or paste the submission portal link."
+              placeholderUrl="https://lms.university.edu/assignments/submit"
+            />
 
             <div className="grid grid-cols-2 gap-3">
               <div>

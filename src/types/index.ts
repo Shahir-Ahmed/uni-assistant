@@ -268,6 +268,12 @@ export interface AIMessage {
   toolCalls?: any
   toolResults?: any
   timestamp: string | Date
+  attachment?: {
+    fileName: string
+    fileUrl?: string
+    fileSize?: number
+    type?: string
+  }
 }
 
 export interface QuizQuestion {

@@ -39,6 +39,7 @@ import { Badge } from "@/components/ui/badge"
 import { academicService } from "@/lib/academic-service"
 import { Resource, Subject, StudyNote, NoteType } from "@/types"
 import { formatDate } from "@/lib/utils"
+import { UnifiedFileInput, FileAttachment } from "@/components/ui/file-input"
 
 export default function MaterialsPage() {
   const [resources, setResources] = React.useState<Resource[]>([])
@@ -49,10 +50,11 @@ export default function MaterialsPage() {
 
   // Upload Dialog
   const [uploadOpen, setUploadOpen] = React.useState(false)
+  const [attachment, setAttachment] = React.useState<FileAttachment | null>(null)
   const [title, setTitle] = React.useState("")
   const [subjectId, setSubjectId] = React.useState("")
   const [category, setCategory] = React.useState("LECTURE_SLIDES")
-  const [fileName, setFileName] = React.useState("Lecture_Notes.pdf")
+  const [fileName, setFileName] = React.useState("")
   const [sampleContent, setSampleContent] = React.useState("")
 
   // Generate Notes Modal
@@ -84,25 +86,36 @@ export default function MaterialsPage() {
     setTitle("")
     setSubjectId(subjects.length > 0 ? subjects[0].id : "")
     setCategory("LECTURE_SLIDES")
-    setFileName("Lecture_Slides_Week7.pdf")
-    setSampleContent("Slide 1: CPU Scheduling Concepts. FCFS, SJF, Priority Scheduling, Round Robin. Slide 2: Banker's Algorithm safety check algorithm.")
+    setFileName("")
+    setSampleContent("")
+    setAttachment(null)
     setUploadOpen(true)
   }
 
   const handleSaveUpload = async () => {
     if (!title.trim() || !subjectId) return
 
-    // Simulate OCR and document extraction
-    const mockExtracted = [
-      { id: `et-1-${Date.now()}`, slideNumber: 1, content: sampleContent.slice(0, 120) },
-      { id: `et-2-${Date.now()}`, slideNumber: 2, content: sampleContent.slice(120) || 'Detailed worked algorithms and formulas.' },
-    ]
+    const actualFileName = attachment?.fileName || fileName || "Document.pdf"
+    const actualFileUrl = attachment?.fileUrl || undefined
+    const extractedText = attachment?.extractedText || sampleContent
+
+    const mockExtracted = extractedText
+      ? [
+          { slideNumber: 1, content: extractedText.slice(0, 200) },
+          ...(extractedText.length > 200 ? [{ slideNumber: 2, content: extractedText.slice(200, 500) }] : []),
+        ]
+      : [
+          { slideNumber: 1, content: `Key syllabus points and indexed notes for ${title.trim()}` },
+        ]
 
     await academicService.createResource({
       title: title.trim(),
       subjectId,
-      resourceType: "PDF",
-      fileName,
+      resourceType: attachment?.type === "URL" ? "LINK" : (actualFileName.toLowerCase().endsWith(".pdf") ? "PDF" : "DOCUMENT"),
+      fileName: actualFileName,
+      fileUrl: actualFileUrl,
+      fileSize: attachment?.fileSize,
+      mimeType: attachment?.mimeType,
       category: category as any,
       isProcessed: true,
       processingStatus: "completed",
@@ -277,6 +290,20 @@ Key takeaways systematically organized from ${selectedResource.fileName}.
                 ))}
               </div>
             )}
+
+            {res.fileUrl && (
+              <div className="pt-1 flex items-center gap-2">
+                <a
+                  href={res.fileUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs text-primary font-semibold hover:underline"
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  <span>View Original Document / Link</span>
+                </a>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -291,7 +318,26 @@ Key takeaways systematically organized from ${selectedResource.fileName}.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 py-2">
+          <div className="space-y-3.5 py-2">
+            {/* Universal File Input (Drag & drop or URL) */}
+            <UnifiedFileInput
+              value={attachment}
+              onChange={(att) => {
+                setAttachment(att)
+                if (att) {
+                  if (!title.trim()) {
+                    setTitle(att.fileName.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "))
+                  }
+                  setFileName(att.fileName)
+                  if (att.extractedText && !sampleContent) {
+                    setSampleContent(att.extractedText.slice(0, 300))
+                  }
+                }
+              }}
+              label="Upload File or Document URL"
+              description="Drag and drop PDF slides, lecture docs, or paste a link."
+            />
+
             <div>
               <Label className="text-xs font-semibold">Document Title *</Label>
               <Input
@@ -336,20 +382,11 @@ Key takeaways systematically organized from ${selectedResource.fileName}.
             </div>
 
             <div>
-              <Label className="text-xs font-semibold">Document File Name</Label>
-              <Input
-                value={fileName}
-                onChange={(e) => setFileName(e.target.value)}
-                className="mt-1 text-xs"
-              />
-            </div>
-
-            <div>
-              <Label className="text-xs font-semibold">Pasted Slide Text / Notes (Simulated OCR)</Label>
+              <Label className="text-xs font-semibold">Key Notes / Extracted Text Preview</Label>
               <Input
                 value={sampleContent}
                 onChange={(e) => setSampleContent(e.target.value)}
-                placeholder="Slide text for indexing..."
+                placeholder="Key concepts or slide text for indexing..."
                 className="mt-1 text-xs"
               />
             </div>

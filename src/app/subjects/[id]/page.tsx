@@ -19,14 +19,33 @@ import {
   AlertCircle,
   FolderOpen,
   Share2,
+  Eye,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
 import { academicService } from "@/lib/academic-service"
 import { Subject, Assignment, AcademicEvent, Announcement, Resource, StudyNote } from "@/types"
 import { formatDate, formatRelativeDate, getPriorityColor, getStatusColor } from "@/lib/utils"
+import { UnifiedFileInput, FileAttachment } from "@/components/ui/file-input"
 
 export default function SubjectWorkspacePage() {
   const params = useParams()
@@ -40,6 +59,57 @@ export default function SubjectWorkspacePage() {
   const [resources, setResources] = React.useState<Resource[]>([])
   const [studyNotes, setStudyNotes] = React.useState<StudyNote[]>([])
   const [activeTab, setActiveTab] = React.useState("overview")
+
+  // Material Upload State
+  const [uploadModalOpen, setUploadModalOpen] = React.useState(false)
+  const [materialAttachment, setMaterialAttachment] = React.useState<FileAttachment | null>(null)
+  const [materialTitle, setMaterialTitle] = React.useState("")
+  const [materialCategory, setMaterialCategory] = React.useState("LECTURE_SLIDES")
+  const [materialDescription, setMaterialDescription] = React.useState("")
+  const [isSavingMaterial, setIsSavingMaterial] = React.useState(false)
+
+  const handleOpenUploadModal = () => {
+    setMaterialAttachment(null)
+    setMaterialTitle("")
+    setMaterialCategory("LECTURE_SLIDES")
+    setMaterialDescription("")
+    setUploadModalOpen(true)
+  }
+
+  const handleSaveSubjectMaterial = async () => {
+    if (!materialTitle.trim() || !subjectId) return
+    setIsSavingMaterial(true)
+    try {
+      const actualFileName = materialAttachment?.fileName || "Lecture_Material.pdf"
+      const extractedText = materialAttachment?.extractedText || materialDescription
+
+      await academicService.createResource({
+        title: materialTitle.trim(),
+        subjectId,
+        resourceType: materialAttachment?.type === "URL" ? "LINK" : (actualFileName.toLowerCase().endsWith(".pdf") ? "PDF" : "DOCUMENT"),
+        fileName: actualFileName,
+        fileUrl: materialAttachment?.fileUrl || undefined,
+        fileSize: materialAttachment?.fileSize,
+        mimeType: materialAttachment?.mimeType,
+        description: materialDescription.trim() || undefined,
+        category: materialCategory as any,
+        isProcessed: true,
+        processingStatus: "completed",
+        extractedTexts: extractedText
+          ? [
+              { slideNumber: 1, content: extractedText.slice(0, 250) },
+              ...(extractedText.length > 250 ? [{ slideNumber: 2, content: extractedText.slice(250, 600) }] : []),
+            ]
+          : [{ slideNumber: 1, content: `Course notes and materials for ${materialTitle.trim()}` }],
+      })
+      setUploadModalOpen(false)
+      await loadData()
+    } catch (err) {
+      console.error("Failed to add material:", err)
+    } finally {
+      setIsSavingMaterial(false)
+    }
+  }
 
   const loadData = React.useCallback(async () => {
     if (!subjectId) return
@@ -392,44 +462,70 @@ export default function SubjectWorkspacePage() {
         <TabsContent value="materials" className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-base text-gray-900 dark:text-gray-100">Lecture Slides & PDFs</h3>
-            <Link href="/materials">
-              <Button size="sm" className="bg-primary text-white text-xs gap-1.5">
-                <Upload className="h-3.5 w-3.5" />
-                <span>Upload New Material</span>
-              </Button>
-            </Link>
+            <Button onClick={handleOpenUploadModal} size="sm" className="bg-primary text-white text-xs gap-1.5 shadow-sm">
+              <Upload className="h-3.5 w-3.5" />
+              <span>Upload New Material</span>
+            </Button>
           </div>
 
           <div className="space-y-3">
-            {resources.map((res) => (
-              <div key={res.id} className="p-4 rounded-xl border border-border bg-white dark:bg-card shadow-sm space-y-2">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <h4 className="font-bold text-sm text-gray-900 dark:text-gray-100">{res.title}</h4>
-                    <p className="text-xs text-muted-foreground">{res.description}</p>
-                  </div>
-                  <Link href={`/assistant?prep=${encodeURIComponent(res.title)}`}>
-                    <Button size="sm" variant="outline" className="text-xs gap-1.5 font-semibold">
-                      <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-                      <span>Deep Analysis</span>
-                    </Button>
-                  </Link>
-                </div>
-
-                {res.extractedTexts && res.extractedTexts.length > 0 && (
-                  <div className="p-3 bg-gray-50 dark:bg-card border border-border rounded-lg text-xs space-y-1.5">
-                    <span className="font-bold text-[11px] text-muted-foreground uppercase tracking-wider block">
-                      Sample Extracted Slides Text ({res.extractedTexts.length} slides indexed):
-                    </span>
-                    {res.extractedTexts.slice(0, 2).map((et) => (
-                      <p key={et.id} className="text-gray-700 dark:text-gray-300 font-mono text-[11px]">
-                        [Slide {et.slideNumber}]: {et.content}
-                      </p>
-                    ))}
-                  </div>
-                )}
+            {resources.length === 0 ? (
+              <div className="p-8 text-center border border-dashed rounded-xl bg-gray-50/50 dark:bg-card/50">
+                <p className="text-xs text-muted-foreground">No lecture slides uploaded yet for this subject.</p>
+                <Button onClick={handleOpenUploadModal} variant="outline" size="sm" className="mt-3 text-xs gap-1.5">
+                  <Upload className="h-3.5 w-3.5" />
+                  <span>Upload Document or Add Link</span>
+                </Button>
               </div>
-            ))}
+            ) : (
+              resources.map((res) => (
+                <div key={res.id} className="p-4 rounded-xl border border-border bg-white dark:bg-card shadow-sm space-y-2">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-sm text-gray-900 dark:text-gray-100">{res.title}</h4>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 uppercase">
+                          {res.resourceType}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{res.description || res.fileName}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {res.fileUrl && (
+                        <a
+                          href={res.fileUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-primary font-semibold hover:underline"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          <span>View</span>
+                        </a>
+                      )}
+                      <Link href={`/assistant?prep=${encodeURIComponent(res.title)}`}>
+                        <Button size="sm" variant="outline" className="text-xs gap-1.5 font-semibold">
+                          <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                          <span>Deep Analysis</span>
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
+
+                  {res.extractedTexts && res.extractedTexts.length > 0 && (
+                    <div className="p-3 bg-gray-50 dark:bg-card border border-border rounded-lg text-xs space-y-1.5">
+                      <span className="font-bold text-[11px] text-muted-foreground uppercase tracking-wider block">
+                        Sample Extracted Slides Text ({res.extractedTexts.length} slides indexed):
+                      </span>
+                      {res.extractedTexts.slice(0, 2).map((et) => (
+                        <p key={et.id} className="text-gray-700 dark:text-gray-300 font-mono text-[11px]">
+                          [Slide {et.slideNumber}]: {et.content}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         </TabsContent>
 
@@ -477,6 +573,81 @@ export default function SubjectWorkspacePage() {
           ))}
         </TabsContent>
       </Tabs>
+
+      {/* Upload Material Dialog for Subject */}
+      <Dialog open={uploadModalOpen} onOpenChange={setUploadModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Course Material to {subject?.name}</DialogTitle>
+            <DialogDescription>
+              Upload PDF slides, notes, or enter a web URL. Files are saved and indexed for AI assistance.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3.5 py-2">
+            <UnifiedFileInput
+              value={materialAttachment}
+              onChange={(att) => {
+                setMaterialAttachment(att)
+                if (att && !materialTitle.trim()) {
+                  setMaterialTitle(att.fileName.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "))
+                }
+              }}
+              label="Select Document File or Enter Link *"
+              description="Drop PDF slides, presentations, or paste an LMS link."
+            />
+
+            <div>
+              <Label className="text-xs font-semibold">Document Title *</Label>
+              <Input
+                value={materialTitle}
+                onChange={(e) => setMaterialTitle(e.target.value)}
+                placeholder="e.g. Chapter 04: Query Optimization"
+                className="mt-1 text-sm font-medium"
+              />
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold">Category</Label>
+              <Select value={materialCategory} onValueChange={setMaterialCategory}>
+                <SelectTrigger className="mt-1 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="LECTURE_SLIDES">Lecture Slides</SelectItem>
+                  <SelectItem value="ASSIGNMENT">Assignment Instructions</SelectItem>
+                  <SelectItem value="QUIZ_MATERIAL">Quiz Prep Material</SelectItem>
+                  <SelectItem value="REFERENCE">Textbook / Reference</SelectItem>
+                  <SelectItem value="NOTES">Personal Notes</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold">Description / Key Notes (Optional)</Label>
+              <Input
+                value={materialDescription}
+                onChange={(e) => setMaterialDescription(e.target.value)}
+                placeholder="Important concepts covered in this file..."
+                className="mt-1 text-xs"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={() => setUploadModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveSubjectMaterial}
+              disabled={!materialTitle.trim() || isSavingMaterial}
+              className="bg-primary hover:bg-primary-700 text-white font-semibold"
+            >
+              {isSavingMaterial ? "Saving..." : "Save to Subject"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

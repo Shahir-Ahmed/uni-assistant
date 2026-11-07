@@ -36,14 +36,29 @@ export async function POST(req: NextRequest) {
         resourceType: body.resourceType || 'OTHER',
         fileName: body.fileName || null,
         fileUrl: body.fileUrl || null,
+        fileSize: body.fileSize ? Number(body.fileSize) : null,
+        mimeType: body.mimeType || null,
         category: body.category || 'OTHER',
-        lectureNumber: body.lectureNumber || null,
+        lectureNumber: body.lectureNumber ? Number(body.lectureNumber) : null,
         sourceDate: body.sourceDate ? new Date(body.sourceDate) : null,
+        isProcessed: body.isProcessed !== undefined ? Boolean(body.isProcessed) : true,
+        processingStatus: body.processingStatus || 'completed',
+        ...(Array.isArray(body.extractedTexts) && body.extractedTexts.length > 0 && {
+          extractedTexts: {
+            create: body.extractedTexts.map((et: any, index: number) => ({
+              slideNumber: et.slideNumber ?? (index + 1),
+              pageNumber: et.pageNumber ?? null,
+              content: typeof et === 'string' ? et : (et.content || String(et)),
+              section: et.section || null,
+            })),
+          },
+        }),
       },
       include: { subject: true, extractedTexts: true },
     })
     return NextResponse.json(resource, { status: 201 })
   } catch (error: any) {
+    console.error('POST /api/resources error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
