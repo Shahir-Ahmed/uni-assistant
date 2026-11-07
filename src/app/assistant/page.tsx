@@ -32,6 +32,7 @@ import { Badge } from "@/components/ui/badge"
 import { academicService } from "@/lib/academic-service"
 import { AIMessage, QuizQuestion } from "@/types"
 import { UnifiedFileInput, FileAttachment } from "@/components/ui/file-input"
+import { assistantEngine } from "@/lib/assistant-engine"
 
 function AssistantContent() {
   const searchParams = useSearchParams()
@@ -106,7 +107,7 @@ Here are a few things you can do:
     setIsTyping(true)
 
     try {
-      const response = await processAcademicCommand(text, activeAttachment)
+      const response = await assistantEngine.process(text, activeAttachment)
       setMessages((prev) => [
         ...prev,
         {
@@ -129,182 +130,6 @@ Here are a few things you can do:
       console.error("Failed to process assistant command:", err)
     } finally {
       setIsTyping(false)
-    }
-  }
-
-  // Controlled Database Execution & NLP Engine
-  const processAcademicCommand = async (
-    text: string,
-    attachedFile?: FileAttachment | null
-  ): Promise<{ reply: string; quizQuestions?: QuizQuestion[] }> => {
-    const lower = text.toLowerCase()
-
-    // 0. Handle Document or File Attachment Query
-    if (attachedFile) {
-      const isUrl = attachedFile.type === "URL"
-      const fileInfo = isUrl
-        ? `[Attached Document URL: ${attachedFile.fileUrl}]`
-        : `[Uploaded File: ${attachedFile.fileName} (${attachedFile.fileSize ? `${(attachedFile.fileSize / 1024).toFixed(1)} KB` : "Document"})]`
-
-      let analysisSummary = ""
-      if (attachedFile.extractedText && attachedFile.extractedText.length > 30) {
-        analysisSummary = `\n\n📄 **Extracted Content Preview:**\n> "${attachedFile.extractedText.slice(0, 300).trim()}..."`
-      }
-
-      return {
-        reply: `📎 **Document Received & Indexed!**\n${fileInfo}${analysisSummary}
-
-I have processed **${attachedFile.fileName}**. Here is how I can assist you with this document:
-1. **Explain concepts & formulas:** Ask me any specific question from these slides or paper.
-2. **Generate Study Guide:** I can summarize definitions, key algorithms, and exam questions.
-3. **Practice Quiz:** Type *"Test me on this file"* to generate an interactive review session.
-4. **Permanent Storage:** This file is saved to the ScholarOS server library and can be linked to your subjects anytime.`,
-      }
-    }
-
-    // 1. "What assignments do I have this week?" or "List assignments"
-    if (
-      lower.includes("assignment") &&
-      (lower.includes("what") || lower.includes("list") || lower.includes("show") || lower.includes("week"))
-    ) {
-      const assignments = await academicService.getAssignments()
-      const active = assignments.filter((a) => !["COMPLETED", "SUBMITTED", "CANCELLED"].includes(a.status))
-
-      if (active.length === 0) {
-        return { reply: "You currently have no pending assignments! Great job staying ahead." }
-      }
-
-      const list = active
-        .map(
-          (a) =>
-            `• **${a.title}** (${a.subject?.name || "Subject"})\n  - Due: ${
-              a.deadline
-                ? new Date(a.deadline).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })
-                : "No deadline"
-            }\n  - Priority: ${a.priority} | Status: ${a.status.replace(/_/g, " ")}`
-        )
-        .join("\n\n")
-
-      return {
-        reply: `Here are your active academic assignments from the database:\n\n${list}\n\nWould you like me to generate a study plan or break down any of these assignments for you?`,
-      }
-    }
-
-    // 2. "When is my next quiz?"
-    if (lower.includes("next quiz") || lower.includes("quiz") || lower.includes("exam")) {
-      const events = (await academicService.getEvents()).filter((e) => e.status === "UPCOMING")
-
-      if (events.length === 0) {
-        return { reply: "You don't have any upcoming quizzes or exams scheduled right now." }
-      }
-
-      const next = events[0]
-      const topicsList = (next.topics || []).map((t: any) => `  * ${t.topic || t}`).join("\n")
-
-      return {
-        reply: `Your next assessment is **${next.title}** for **${next.subject?.name || "Subject"}**.\n\n* **Scheduled Date:** ${
-          next.date ? new Date(next.date).toLocaleDateString() : "TBD"
-        } at ${next.startTime || "TBD"}\n* **Location:** ${next.location || "Classroom"}\n* **Syllabus Topics Covered:**\n${topicsList}\n\nWould you like to start an **interactive practice quiz session** right now to test your understanding?`,
-      }
-    }
-
-    // 3. Command: "Create assignment"
-    if (
-      lower.startsWith("create an assignment") ||
-      lower.startsWith("create assignment") ||
-      lower.startsWith("add assignment")
-    ) {
-      const subjects = await academicService.getSubjects()
-      const parsed = academicService.parseAcademicText(text, subjects)
-      if (parsed.subjectId) {
-        const asg = await academicService.createAssignment({
-          subjectId: parsed.subjectId,
-          title: parsed.title,
-          description: text,
-          originalAnnouncement: text,
-          deadline: parsed.extractedDate,
-          deadlineConfirmed: !parsed.dateIsAmbiguous && !!parsed.extractedDate,
-          priority: "HIGH",
-          status: "NOT_STARTED",
-          sortOrder: 0,
-        })
-
-        return {
-          reply: `✅ **Assignment Successfully Created in Database!**\n\n* **Title:** ${asg.title}\n* **Subject:** ${
-            asg.subject?.name || parsed.subjectName || "Assigned"
-          }\n* **Deadline:** ${
-            asg.deadline ? new Date(asg.deadline).toLocaleString() : "Confirmation needed"
-          }\n* **Audit:** Permanently saved to database.`,
-        }
-      }
-    }
-
-    // 4. Interactive Quiz / Exam Prep Mode
-    if (lower.includes("prepare") || lower.includes("practice quiz") || lower.includes("test me")) {
-      const questions: QuizQuestion[] = [
-        {
-          id: "q-1",
-          question: "Which of the following is NOT one of the four Coffman conditions required for a deadlock to occur?",
-          questionType: "MCQ",
-          options: [
-            "Mutual Exclusion",
-            "Hold and Wait",
-            "Preemptive Scheduling",
-            "Circular Wait",
-          ],
-          correctAnswer: "Preemptive Scheduling",
-          explanation:
-            "The four Coffman conditions are: Mutual Exclusion, Hold and Wait, No Preemption (resources cannot be forcibly taken away), and Circular Wait. 'Preemptive Scheduling' actually prevents deadlocks rather than causing them.",
-          concept: "Operating Systems — Deadlock Coffman Conditions",
-        },
-        {
-          id: "q-2",
-          question:
-            "In relational schema design, how should a Many-to-Many (M:N) relationship between Student and Course be represented?",
-          questionType: "MCQ",
-          options: [
-            "Add CourseID as a foreign key in Student",
-            "Add StudentID as a foreign key in Course",
-            "Create a separate junction table containing primary keys of both entities",
-            "Merge Student and Course into a single table",
-          ],
-          correctAnswer: "Create a separate junction table containing primary keys of both entities",
-          explanation:
-            "M:N relationships cannot be directly stored with single foreign keys without violating 1NF. A junction (cross-reference) table is required, with composite primary key (StudentID, CourseID).",
-          concept: "Database Systems — Relational Mapping",
-        },
-        {
-          id: "q-3",
-          question: "What is the primary advantage of Banker's Algorithm in an operating system?",
-          questionType: "MCQ",
-          options: [
-            "It speeds up CPU execution by 50%",
-            "It avoids deadlocks dynamically by verifying that resource allocations leave the system in a safe state",
-            "It completely eliminates the need for virtual memory",
-            "It allows processes to run without needing any RAM",
-          ],
-          correctAnswer:
-            "It avoids deadlocks dynamically by verifying that resource allocations leave the system in a safe state",
-          explanation:
-            "Banker's Algorithm simulates resource allocation for each process and checks whether at least one safe sequence exists where every process can complete its execution without deadlocking.",
-          concept: "Operating Systems — Banker's Algorithm",
-        },
-      ]
-
-      return {
-        reply: `🎯 **Quiz Preparation Mode Activated!**\n\nI have retrieved your uploaded course materials on CPU scheduling, relational mapping, and deadlocks. I will ask you questions one at a time. Select your answer below to test yourself and see detailed explanations.`,
-        quizQuestions: questions,
-      }
-    }
-
-    // 5. Default Fallback
-    return {
-      reply: `I have processed your query: "${text}".\n\nAll your academic data is synchronized locally and ready for deployment. You can attach slides/URLs, inspect assignments, review lecture notes, or run a practice quiz anytime!`,
     }
   }
 
@@ -369,6 +194,48 @@ I have processed **${attachedFile.fileName}**. Here is how I can assist you with
             <span>Upcoming Work</span>
           </Button>
         </div>
+      </div>
+
+      {/* Quick Action Pills */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+        <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider shrink-0 mr-1">
+          Quick Actions:
+        </span>
+        <button
+          type="button"
+          onClick={() => handleUserSubmit("What assignments do I have this week?")}
+          className="px-2.5 py-1 rounded-full border border-border bg-white dark:bg-card hover:border-primary/60 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-all text-[11px]"
+        >
+          📋 Pending Work
+        </button>
+        <button
+          type="button"
+          onClick={() => handleUserSubmit("When is my next quiz and what topics does it cover?")}
+          className="px-2.5 py-1 rounded-full border border-border bg-white dark:bg-card hover:border-primary/60 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-all text-[11px]"
+        >
+          🎯 Next Quiz
+        </button>
+        <button
+          type="button"
+          onClick={() => handleUserSubmit("Add subject Cloud Computing (CS-408), instructor Dr. Farhan")}
+          className="px-2.5 py-1 rounded-full border border-border bg-white dark:bg-card hover:border-primary/60 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-all text-[11px]"
+        >
+          ➕ Add Subject
+        </button>
+        <button
+          type="button"
+          onClick={() => handleUserSubmit("Create study notes for Database Systems on BCNF vs 3NF with examples")}
+          className="px-2.5 py-1 rounded-full border border-border bg-white dark:bg-card hover:border-primary/60 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-all text-[11px]"
+        >
+          📝 Generate BCNF Notes
+        </button>
+        <button
+          type="button"
+          onClick={() => handleUserSubmit("Practice quiz on Operating Systems")}
+          className="px-2.5 py-1 rounded-full border border-border bg-white dark:bg-card hover:border-primary/60 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-all text-[11px]"
+        >
+          ⚡ Practice Quiz
+        </button>
       </div>
 
       {/* Interactive Quiz Mode Card */}
