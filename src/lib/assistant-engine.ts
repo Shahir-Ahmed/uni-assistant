@@ -174,9 +174,9 @@ class AssistantEngine {
         processingStatus: 'completed',
         extractedTexts: attachment.extractedText
           ? [
-              { slideNumber: 1, content: attachment.extractedText.slice(0, 250) },
-              ...(attachment.extractedText.length > 250 ? [{ slideNumber: 2, content: attachment.extractedText.slice(250, 600) }] : []),
-            ]
+            { slideNumber: 1, content: attachment.extractedText.slice(0, 250) },
+            ...(attachment.extractedText.length > 250 ? [{ slideNumber: 2, content: attachment.extractedText.slice(250, 600) }] : []),
+          ]
           : [{ slideNumber: 1, content: `Document attached via assistant: ${actualFileName}` }],
       })
 
@@ -267,7 +267,7 @@ class AssistantEngine {
       deadlineConfirmed: !parsed.dateIsAmbiguous && !!parsed.extractedDate,
       submissionMethod: 'University Portal',
       submissionLink: attachment?.fileUrl || undefined,
-      priority: (parsed.priority as Priority) || 'HIGH',
+      priority: 'HIGH',
       status: 'NOT_STARTED',
       sortOrder: 0,
     })
@@ -478,11 +478,11 @@ class AssistantEngine {
       .map((a) => {
         const dStr = a.deadline
           ? new Date(a.deadline).toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              hour: 'numeric',
-              minute: '2-digit',
-            })
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+          })
           : 'No deadline set'
         return `• **${a.title}** (${a.subject?.name || 'Subject'})\n  * Due: **${dStr}** | Priority: **${a.priority}**\n  * Status: \`${a.status}\`${a.submissionLink ? ` | [Attached Link](${a.submissionLink})` : ''}`
       })
