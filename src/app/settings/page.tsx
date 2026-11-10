@@ -13,6 +13,7 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertTriangle,
+  Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -30,11 +31,10 @@ import { Switch } from "@/components/ui/switch"
 import { academicService } from "@/lib/academic-service"
 
 export default function SettingsPage() {
-  const [provider, setProvider] = React.useState("local")
-  const [modelName, setModelName] = React.useState("gpt-4o-mini")
+  const [provider, setProvider] = React.useState("gemini")
+  const [modelName, setModelName] = React.useState("gemini-2.5-flash")
   const [localEndpoint, setLocalEndpoint] = React.useState("http://localhost:11434/v1")
-  const [apiKey, setApiKey] = React.useState("")
-  const [offlineOnly, setOfflineOnly] = React.useState(true)
+  const [offlineOnly, setOfflineOnly] = React.useState(false)
   const [statusMessage, setStatusMessage] = React.useState("")
 
   const handleExportBackup = async () => {
@@ -157,19 +157,19 @@ export default function SettingsPage() {
                 Compatible with Ollama, LM Studio, or vLLM running on your local machine with no external network transmission.
               </span>
             </div>
-          ) : (
-            <div>
-              <Label className="text-xs font-semibold">API Key</Label>
-              <Input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
-                className="mt-1 text-xs"
-              />
-              <span className="text-[11px] text-muted-foreground mt-1 block">
-                Keys are stored securely in memory or server environment variables and never exposed to the client bundle.
+          ) : provider === "gemini" ? (
+            <div className="p-3.5 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/20 text-xs text-blue-900 dark:text-blue-200 space-y-1">
+              <span className="font-bold flex items-center gap-1.5 text-primary dark:text-blue-300">
+                <Sparkles className="h-4 w-4 text-amber-500" />
+                <span>Google Gemini 2.5 Flash Connected</span>
               </span>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                Connected securely via server-side `@google/genai` SDK using `gemini-2.5-flash`. All course workspaces, assignments, and uploaded lecture slides are dynamically grounded in your university database.
+              </p>
+            </div>
+          ) : (
+            <div className="p-3 rounded-lg border border-border bg-gray-50 dark:bg-card text-xs text-muted-foreground">
+              Third-party model provider configured via server-side API proxy.
             </div>
           )}
 

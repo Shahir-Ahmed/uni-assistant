@@ -43,15 +43,15 @@ function AssistantContent() {
     {
       id: "msg-welcome",
       role: "assistant",
-      content: `Hello! I am your ScholarOS Personal Academic Assistant.
+      content: `Hello! I am your ScholarOS Personal Academic Assistant, powered by Google Gemini 2.5 Flash.
 I am connected directly to your university database, assignments, lecture slides, and academic calendar.
 
 Here are a few things you can do:
-* Attach or drag & drop lecture slides, PDFs, or paste URLs to analyze
+* Ask questions about your courses, deadlines, and syllabus
 * "What assignments do I have this week?"
 * "When is my next quiz and what topics does it cover?"
-* "Create an assignment for Database Systems due Nov 5 at 11:59 PM"
-* "Prepare me for my Operating Systems quiz on CPU scheduling and deadlocks"`,
+* "Quiz me on CPU scheduling and deadlocks"
+* Attach or drag & drop lecture slides or PDFs to summarize and generate study notes`,
       timestamp: new Date(),
     },
   ])
@@ -107,7 +107,23 @@ Here are a few things you can do:
     setIsTyping(true)
 
     try {
-      const response = await assistantEngine.process(text, activeAttachment)
+      const res = await fetch("/api/assistant/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          attachment: activeAttachment,
+          history: messages.slice(-4).map((m) => ({ role: m.role, content: m.content })),
+        }),
+      })
+
+      let response: { reply: string; quizQuestions?: QuizQuestion[]; model?: string }
+      if (res.ok) {
+        response = await res.json()
+      } else {
+        response = await assistantEngine.process(text, activeAttachment)
+      }
+
       setMessages((prev) => [
         ...prev,
         {
@@ -127,7 +143,25 @@ Here are a few things you can do:
         setQuizActive(true)
       }
     } catch (err) {
-      console.error("Failed to process assistant command:", err)
+      console.error("Failed to process assistant command via API, using fallback:", err)
+      const fallback = await assistantEngine.process(text, activeAttachment)
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `msg-${Date.now() + 1}`,
+          role: "assistant",
+          content: fallback.reply,
+          timestamp: new Date(),
+        },
+      ])
+      if (fallback.quizQuestions && fallback.quizQuestions.length > 0) {
+        setQuizQuestions(fallback.quizQuestions)
+        setCurrentQuestionIndex(0)
+        setUserSelectedOption(null)
+        setShowAnswerFeedback(false)
+        setScore(0)
+        setQuizActive(true)
+      }
     } finally {
       setIsTyping(false)
     }
@@ -180,6 +214,10 @@ Here are a few things you can do:
         </div>
 
         <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-xs bg-blue-50 dark:bg-blue-950/40 border-blue-400 text-blue-700 dark:text-blue-300 gap-1.5 py-1 font-semibold">
+            <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+            <span>Gemini 2.5 Flash</span>
+          </Badge>
           <Badge variant="outline" className="text-xs bg-emerald-50 dark:bg-emerald-950 border-emerald-500 text-emerald-700 dark:text-emerald-300 gap-1.5 py-1">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
             <span>Database Connected</span>

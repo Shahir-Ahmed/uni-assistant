@@ -1,0 +1,8 @@
+{
+  "name": "ScholarOS",
+  "description": "Personal AI University Assistant & Academic Management Command Center",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

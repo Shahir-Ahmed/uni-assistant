@@ -25,8 +25,10 @@ export function Header({ onQuickCapture, onToggleMobileNav }: HeaderProps) {
   const [reminders, setReminders] = React.useState<Reminder[]>([])
   const [searchQuery, setSearchQuery] = React.useState("")
   const [isDark, setIsDark] = React.useState(false)
+  const [mounted, setMounted] = React.useState(false)
 
   React.useEffect(() => {
+    setMounted(true)
     try {
       const activeReminders = academicService.getReminders()
       setReminders(activeReminders.filter((r) => r.status === 'PENDING').slice(0, 5))
@@ -158,8 +160,9 @@ export function Header({ onQuickCapture, onToggleMobileNav }: HeaderProps) {
           onClick={toggleTheme}
           className="h-9 w-9 text-gray-600 dark:text-gray-300"
           title="Toggle Dark Mode"
+          suppressHydrationWarning
         >
-          {isDark ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4" />}
+          {mounted && isDark ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4" />}
         </Button>
       </div>
     </header>

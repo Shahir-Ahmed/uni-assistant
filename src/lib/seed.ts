@@ -137,7 +137,7 @@ export async function seedInitialData(userId: string) {
               },
             ],
           },
-        },
+        } as any,
       })
     }
   }
@@ -197,7 +197,7 @@ export async function seedInitialData(userId: string) {
           topics: {
             create: topics.map((t) => ({ topic: t })),
           },
-        },
+        } as any,
       })
     }
   }
@@ -234,7 +234,7 @@ export async function seedInitialData(userId: string) {
     await prisma.announcement.upsert({
       where: { id: ann.id },
       update: {},
-      create: ann,
+      create: ann as any,
     })
   }
 
@@ -282,7 +282,7 @@ export async function seedInitialData(userId: string) {
           extractedTexts: {
             create: extractedTexts,
           },
-        },
+        } as any,
       })
     }
   }
@@ -321,7 +321,7 @@ If $\\text{Need} \\le \\text{Available}$, the process can complete safely and re
     await prisma.studyNote.upsert({
       where: { id: note.id },
       update: {},
-      create: note,
+      create: note as any,
     })
   }
 
@@ -353,7 +353,7 @@ If $\\text{Need} \\le \\text{Available}$, the process can complete safely and re
     await prisma.reminder.upsert({
       where: { id: rem.id },
       update: {},
-      create: rem,
+      create: rem as any,
     })
   }
 }

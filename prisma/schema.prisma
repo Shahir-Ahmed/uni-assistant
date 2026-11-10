@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -49,12 +49,12 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String?
-  access_token      String?
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String?
+  id_token          String? @db.Text
   session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -95,7 +95,7 @@ model Subject {
   semester    String?
   academicYear String?
   instructor  String?
-  description String?
+  description String?  @db.Text
   color       String   @default("#1E3A5F")
   icon        String?
   schedule    Json?
@@ -121,21 +121,21 @@ model Assignment {
   userId              String
   subjectId           String
   title               String
-  description         String?
-  instructions        String?
-  originalAnnouncement String?
+  description         String?          @db.Text
+  instructions        String?          @db.Text
+  originalAnnouncement String?         @db.Text
   assignedDate        DateTime?
   deadline            DateTime?
   deadlineConfirmed   Boolean          @default(false)
   submissionMethod    String?
   submissionLink      String?
-  priority            String           @default("MEDIUM")
+  priority            Priority         @default(MEDIUM)
   estimatedEffort     String?
-  status              String           @default("NOT_STARTED")
+  status              AssignmentStatus @default(NOT_STARTED)
   completionDate      DateTime?
   grade               String?
-  feedback            String?
-  personalNotes       String?
+  feedback            String?          @db.Text
+  personalNotes       String?          @db.Text
   sortOrder           Int              @default(0)
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
@@ -153,12 +153,28 @@ model Assignment {
   @@map("assignments")
 }
 
+enum AssignmentStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  READY_TO_SUBMIT
+  SUBMITTED
+  COMPLETED
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
 model AssignmentHistory {
   id           String   @id @default(cuid())
   assignmentId String
   field        String
-  oldValue     String?
-  newValue     String?
+  oldValue     String?  @db.Text
+  newValue     String?  @db.Text
   changedAt    DateTime @default(now())
   reason       String?
 
@@ -173,13 +189,13 @@ model Announcement {
   userId          String
   subjectId       String?
   title           String?
-  originalMessage String
-  category        String             @default("GENERAL")
+  originalMessage String             @db.Text
+  category        AnnouncementCategory @default(GENERAL)
   source          String?
   sourceGroup     String?
   dateReceived    DateTime           @default(now())
   extractedData   Json?
-  personalRemarks String?
+  personalRemarks String?            @db.Text
   isProcessed     Boolean            @default(false)
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
@@ -194,20 +210,32 @@ model Announcement {
   @@map("announcements")
 }
 
+enum AnnouncementCategory {
+  ASSIGNMENT
+  QUIZ
+  EXAM
+  PRESENTATION
+  DEADLINE_CHANGE
+  CLASS_CANCELLED
+  SCHEDULE_CHANGE
+  GENERAL
+  OTHER
+}
+
 model AcademicEvent {
   id                  String        @id @default(cuid())
   userId              String
   subjectId           String?
   title               String
-  eventType           String        @default("CUSTOM")
+  eventType           EventType
   date                DateTime?
   startTime           String?
   endTime             String?
   location            String?
-  description         String?
-  originalAnnouncement String?
-  priority            String        @default("MEDIUM")
-  status              String        @default("UPCOMING")
+  description         String?       @db.Text
+  originalAnnouncement String?      @db.Text
+  priority            Priority      @default(MEDIUM)
+  status              EventStatus   @default(UPCOMING)
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
@@ -222,6 +250,30 @@ model AcademicEvent {
   @@index([userId, eventType])
   @@index([subjectId])
   @@map("academic_events")
+}
+
+enum EventType {
+  QUIZ
+  MIDTERM
+  FINAL_EXAM
+  PRESENTATION
+  VIVA
+  PROJECT_DEADLINE
+  LAB_SUBMISSION
+  PRACTICAL_EXAM
+  READING_DEADLINE
+  GROUP_MEETING
+  CLASS
+  ASSIGNMENT_DEADLINE
+  CUSTOM
+}
+
+enum EventStatus {
+  UPCOMING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  POSTPONED
 }
 
 model EventTopic {
@@ -240,14 +292,14 @@ model Resource {
   userId          String
   subjectId       String?
   title           String
-  description     String?
-  resourceType    String       @default("OTHER")
+  description     String?      @db.Text
+  resourceType    ResourceType
   fileName        String?
   fileUrl         String?
   fileSize        Int?
   mimeType        String?
   storageKey      String?
-  category        String       @default("OTHER")
+  category        ResourceCategory @default(OTHER)
   isProcessed     Boolean      @default(false)
   processingStatus String?
   extractedTitle  String?
@@ -268,12 +320,37 @@ model Resource {
   @@map("resources")
 }
 
+enum ResourceType {
+  PDF
+  IMAGE
+  PRESENTATION
+  DOCUMENT
+  SPREADSHEET
+  TEXT
+  LINK
+  NOTE
+  OTHER
+}
+
+enum ResourceCategory {
+  LECTURE_SLIDES
+  ASSIGNMENT
+  QUIZ_MATERIAL
+  EXAM_MATERIAL
+  REFERENCE
+  TEXTBOOK
+  NOTES
+  ANNOUNCEMENT
+  STUDY_GUIDE
+  OTHER
+}
+
 model ExtractedText {
   id         String @id @default(cuid())
   resourceId String
   pageNumber Int?
   slideNumber Int?
-  content    String
+  content    String @db.Text
   section    String?
   createdAt  DateTime @default(now())
 
@@ -331,8 +408,8 @@ model Reminder {
   title        String
   message      String?
   remindAt     DateTime
-  type         String        @default("DEADLINE")
-  status       String        @default("PENDING")
+  type         ReminderType  @default(DEADLINE)
+  status       ReminderStatus @default(PENDING)
   isSent       Boolean       @default(false)
   sentAt       DateTime?
   createdAt    DateTime      @default(now())
@@ -347,13 +424,29 @@ model Reminder {
   @@map("reminders")
 }
 
+enum ReminderType {
+  DEADLINE
+  QUIZ
+  EXAM
+  PRESENTATION
+  STUDY
+  CUSTOM
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  DISMISSED
+  CANCELLED
+}
+
 model StudyNote {
   id          String   @id @default(cuid())
   userId      String
   subjectId   String?
   title       String
-  content     String
-  noteType    String   @default("DETAILED")
+  content     String   @db.Text
+  noteType    NoteType @default(DETAILED)
   sourceResourceId String?
   sourcePages String?
   isGenerated Boolean  @default(false)
@@ -368,15 +461,31 @@ model StudyNote {
   @@map("study_notes")
 }
 
+enum NoteType {
+  DETAILED
+  REVISION
+  EXAM_FOCUSED
+  SUMMARY
+  DEFINITIONS
+  FORMULA_SHEET
+  COMPARISON
+  WORKED_EXAMPLES
+  FLASHCARDS
+  MCQ
+  SHORT_ANSWER
+  LONG_ANSWER
+  QUESTION_BANK
+}
+
 model StudyTask {
   id          String   @id @default(cuid())
   userId      String
   subjectId   String?
   title       String
-  description String?
+  description String?  @db.Text
   dueDate     DateTime?
-  priority    String   @default("MEDIUM")
-  status      String   @default("NOT_STARTED")
+  priority    Priority @default(MEDIUM)
+  status      AssignmentStatus @default(NOT_STARTED)
   parentTaskId String?
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
@@ -393,7 +502,7 @@ model QuizSession {
   userId      String
   subjectId   String?
   title       String
-  topics      String   @default("[]")
+  topics      String[]
   totalQuestions Int    @default(0)
   correctAnswers Int   @default(0)
   score       Float?
@@ -411,12 +520,12 @@ model QuizSession {
 model QuizQuestion {
   id            String       @id @default(cuid())
   sessionId     String
-  question      String
-  questionType  String       @default("MCQ")
+  question      String       @db.Text
+  questionType  QuestionType
   options       Json?
-  correctAnswer String
-  explanation   String?
-  userAnswer    String?
+  correctAnswer String       @db.Text
+  explanation   String?      @db.Text
+  userAnswer    String?      @db.Text
   isCorrect     Boolean?
   concept       String?
   answeredAt    DateTime?
@@ -425,6 +534,15 @@ model QuizQuestion {
 
   @@index([sessionId])
   @@map("quiz_questions")
+}
+
+enum QuestionType {
+  MCQ
+  TRUE_FALSE
+  SHORT_ANSWER
+  CONCEPTUAL
+  SCENARIO
+  NUMERICAL
 }
 
 model AIConversation {
@@ -446,7 +564,7 @@ model AIMessage {
   id             String   @id @default(cuid())
   conversationId String
   role           String
-  content        String
+  content        String   @db.Text
   toolCalls      Json?
   toolResults    Json?
   metadata       Json?
@@ -461,11 +579,11 @@ model AIMessage {
 model InboxItem {
   id              String      @id @default(cuid())
   userId          String
-  rawContent      String
+  rawContent      String      @db.Text
   contentType     String      @default("text")
   fileName        String?
   fileUrl         String?
-  status          String      @default("NEW")
+  status          InboxStatus @default(NEW)
   extractedData   Json?
   aiConfidence    Float?
   errorMessage    String?
@@ -477,6 +595,14 @@ model InboxItem {
 
   @@index([userId, status])
   @@map("inbox_items")
+}
+
+enum InboxStatus {
+  NEW
+  PROCESSING
+  NEEDS_REVIEW
+  ORGANIZED
+  FAILED
 }
 
 model ActivityLog {

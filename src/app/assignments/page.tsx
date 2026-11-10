@@ -698,7 +698,7 @@ export default function AssignmentsPage() {
                   </div>
                   <p className="text-gray-800 dark:text-gray-200 font-medium">
                     {h.oldValue ? `Changed from: "${h.oldValue}"` : "Initial value"}{" "}
-                    &rarr; <span className="text-primary font-bold">"{h.newValue}"</span>
+                    &rarr; <span className="text-primary font-bold">&quot;{h.newValue}&quot;</span>
                   </p>
                   {h.reason && <p className="text-[11px] text-muted-foreground italic">Reason: {h.reason}</p>}
                 </div>

@@ -24,9 +24,10 @@ import { academicService } from "@/lib/academic-service"
 
 interface SidebarProps {
   onQuickCapture?: () => void
+  className?: string
 }
 
-export function Sidebar({ onQuickCapture }: SidebarProps) {
+export function Sidebar({ onQuickCapture, className }: SidebarProps) {
   const pathname = usePathname()
   const [pendingAssignmentsCount, setPendingAssignmentsCount] = React.useState(0)
   const [unprocessedInboxCount, setUnprocessedInboxCount] = React.useState(0)
@@ -101,7 +102,7 @@ export function Sidebar({ onQuickCapture }: SidebarProps) {
   ]
 
   return (
-    <aside className="hidden lg:flex flex-col w-64 border-r border-border bg-white dark:bg-card h-screen sticky top-0 shadow-sm z-30">
+    <aside className={cn("hidden lg:flex flex-col w-64 border-r border-border bg-white dark:bg-card h-screen sticky top-0 shadow-sm z-30", className)}>
       {/* Brand Header */}
       <div className="p-5 border-b border-border flex items-center justify-between">
         <Link href="/" className="flex items-center space-x-3 group">
