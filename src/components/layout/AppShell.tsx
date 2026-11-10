@@ -1,13 +1,24 @@
 "use client"
 
 import * as React from "react"
+import { usePathname } from "next/navigation"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { Header } from "@/components/layout/Header"
 import { QuickCaptureModal } from "@/components/capture/QuickCaptureModal"
+import { AuthProvider, useAuth } from "@/lib/auth-context"
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+function AppShellInner({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
+  const { user, isLoading } = useAuth()
   const [captureOpen, setCaptureOpen] = React.useState(false)
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false)
+
+  // Auth pages (login, signup) render standalone without the academic sidebar/header
+  const isAuthPage = pathname === "/login" || pathname === "/signup"
+
+  if (isAuthPage) {
+    return <main className="min-h-screen w-full">{children}</main>
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground antialiased flex w-full">
@@ -56,5 +67,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         }}
       />
     </div>
+  )
+}
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <AuthProvider>
+      <AppShellInner>{children}</AppShellInner>
+    </AuthProvider>
   )
 }

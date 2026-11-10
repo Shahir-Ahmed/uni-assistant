@@ -16,11 +16,14 @@ import {
   GraduationCap,
   Sparkles,
   PlusCircle,
+  LogOut,
+  LogIn,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { academicService } from "@/lib/academic-service"
+import { useAuth } from "@/lib/auth-context"
 
 interface SidebarProps {
   onQuickCapture?: () => void
@@ -29,6 +32,7 @@ interface SidebarProps {
 
 export function Sidebar({ onQuickCapture, className }: SidebarProps) {
   const pathname = usePathname()
+  const { user, logout } = useAuth()
   const [pendingAssignmentsCount, setPendingAssignmentsCount] = React.useState(0)
   const [unprocessedInboxCount, setUnprocessedInboxCount] = React.useState(0)
 
@@ -178,22 +182,43 @@ export function Sidebar({ onQuickCapture, className }: SidebarProps) {
         })}
       </nav>
 
-      {/* Footer Profile & Status */}
-      <div className="p-4 border-t border-border bg-gray-50/50 dark:bg-card">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="h-9 w-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
-              ME
-            </div>
-            <div className="text-xs">
-              <p className="font-semibold text-gray-900 dark:text-gray-100">My Workspace</p>
-              <div className="flex items-center gap-1.5 text-emerald-600 font-medium">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
-                <span>Local & Offline Ready</span>
+      {/* Footer Profile */}
+      <div className="p-3 border-t border-border bg-gray-50/50 dark:bg-card">
+        {user ? (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2.5 overflow-hidden">
+              <div className="h-8 w-8 rounded-full bg-primary text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+                {user.name ? user.name.slice(0, 2).toUpperCase() : "ST"}
+              </div>
+              <div className="text-xs overflow-hidden">
+                <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{user.name}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{user.email}</p>
               </div>
             </div>
+            <button
+              type="button"
+              onClick={logout}
+              title="Sign Out"
+              className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-gray-100 dark:hover:bg-muted transition-colors shrink-0"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
-        </div>
+        ) : (
+          <div className="flex items-center justify-between">
+            <div className="text-xs">
+              <p className="font-semibold text-gray-900 dark:text-gray-100">Guest Student</p>
+              <p className="text-[10px] text-muted-foreground">Demo environment</p>
+            </div>
+            <Link
+              href="/login"
+              className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
+            >
+              <LogIn className="h-3.5 w-3.5" />
+              <span>Sign In</span>
+            </Link>
+          </div>
+        )}
       </div>
     </aside>
   )

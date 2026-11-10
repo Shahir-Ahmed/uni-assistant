@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Search, Bell, Menu, PlusCircle, Bot, Sparkles, Moon, Sun, AlertTriangle } from "lucide-react"
+import Link from "next/link"
+import { Search, Bell, Menu, Moon, Sun, User as UserIcon, LogOut, LogIn, UserPlus, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { academicService } from "@/lib/academic-service"
 import { Reminder } from "@/types"
+import { useAuth } from "@/lib/auth-context"
 
 interface HeaderProps {
   onQuickCapture?: () => void
@@ -22,6 +24,7 @@ interface HeaderProps {
 }
 
 export function Header({ onQuickCapture, onToggleMobileNav }: HeaderProps) {
+  const { user, logout } = useAuth()
   const [reminders, setReminders] = React.useState<Reminder[]>([])
   const [searchQuery, setSearchQuery] = React.useState("")
   const [isDark, setIsDark] = React.useState(false)
@@ -31,7 +34,7 @@ export function Header({ onQuickCapture, onToggleMobileNav }: HeaderProps) {
     setMounted(true)
     try {
       const activeReminders = academicService.getReminders()
-      setReminders(activeReminders.filter((r) => r.status === 'PENDING').slice(0, 5))
+      setReminders(activeReminders.filter((r) => r.status === "PENDING").slice(0, 5))
 
       if (document.documentElement.classList.contains("dark")) {
         setIsDark(true)
@@ -49,6 +52,16 @@ export function Header({ onQuickCapture, onToggleMobileNav }: HeaderProps) {
       document.documentElement.classList.add("dark")
       setIsDark(true)
     }
+  }
+
+  // Get user initials e.g. "Sarah Connor" -> "SC"
+  const getInitials = (name?: string | null) => {
+    if (!name) return "ST"
+    const parts = name.trim().split(/\s+/)
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase()
+    }
+    return name.slice(0, 2).toUpperCase()
   }
 
   return (
@@ -92,28 +105,8 @@ export function Header({ onQuickCapture, onToggleMobileNav }: HeaderProps) {
         </form>
       </div>
 
-      {/* Actions: Quick Capture, AI Chat, Reminders, Theme */}
-      <div className="flex items-center gap-2">
-        <Button
-          onClick={onQuickCapture}
-          size="sm"
-          className="hidden sm:flex items-center gap-1.5 bg-primary hover:bg-primary-700 text-white rounded-lg h-9 px-3 text-xs font-semibold shadow-sm"
-        >
-          <PlusCircle className="h-3.5 w-3.5" />
-          <span>Capture</span>
-        </Button>
-
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => (window.location.href = "/assistant")}
-          className="flex items-center gap-1.5 border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary rounded-lg h-9 px-3 text-xs font-medium"
-        >
-          <Bot className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Ask AI</span>
-          <Sparkles className="h-3 w-3 text-amber-500 hidden sm:inline" />
-        </Button>
-
+      {/* Actions: Reminders, Theme, Student Profile / Auth */}
+      <div className="flex items-center gap-2.5">
         {/* Reminders / Notifications */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -164,6 +157,64 @@ export function Header({ onQuickCapture, onToggleMobileNav }: HeaderProps) {
         >
           {mounted && isDark ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4" />}
         </Button>
+
+        {/* Student Profile / Auth Dropdown */}
+        {user ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-full hover:bg-gray-100 dark:hover:bg-muted transition-colors focus:outline-none"
+              >
+                <div className="h-8 w-8 rounded-full bg-primary text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                  {getInitials(user.name)}
+                </div>
+                <div className="hidden sm:block text-left">
+                  <p className="text-xs font-semibold leading-tight text-gray-900 dark:text-gray-100 max-w-[120px] truncate">
+                    {user.name}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground leading-tight truncate max-w-[120px]">
+                    {user.email}
+                  </p>
+                </div>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>
+                <p className="font-semibold text-xs text-gray-900 dark:text-gray-100">{user.name}</p>
+                <p className="text-[11px] text-muted-foreground truncate">{user.email}</p>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/settings" className="flex items-center gap-2 cursor-pointer text-xs">
+                  <Settings className="h-3.5 w-3.5" />
+                  <span>Workspace Settings</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={logout}
+                className="flex items-center gap-2 text-xs text-red-600 dark:text-red-400 cursor-pointer"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Sign Out</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <Link href="/login">
+              <Button variant="ghost" size="sm" className="h-8 px-2.5 text-xs font-semibold">
+                Sign In
+              </Button>
+            </Link>
+            <Link href="/signup">
+              <Button size="sm" className="h-8 px-3 text-xs font-semibold bg-primary text-white">
+                Register
+              </Button>
+            </Link>
+          </div>
+        )}
       </div>
     </header>
   )

@@ -368,16 +368,13 @@ class AcademicService {
   async getSubjects(): Promise<Subject[]> {
     try {
       const data = await apiFetch<Subject[]>('/api/subjects')
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         setCache(CACHE_KEYS.SUBJECTS, data)
         return data
       }
-      // If DB has no subjects yet, check local cache or fallback to initial seed
-      const cached = getCache<Subject[]>(CACHE_KEYS.SUBJECTS, initialSubjects)
-      return cached
+      return getCache<Subject[]>(CACHE_KEYS.SUBJECTS, [])
     } catch {
-      // Offline fallback
-      return getCache<Subject[]>(CACHE_KEYS.SUBJECTS, initialSubjects)
+      return getCache<Subject[]>(CACHE_KEYS.SUBJECTS, [])
     }
   }
 
@@ -475,14 +472,14 @@ class AcademicService {
       if (filters?.status) params.set('status', filters.status)
       const qs = params.toString()
       const data = await apiFetch<Assignment[]>(`/api/assignments${qs ? `?${qs}` : ''}`)
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         setCache(CACHE_KEYS.ASSIGNMENTS, data)
         list = data
       } else {
-        list = getCache<Assignment[]>(CACHE_KEYS.ASSIGNMENTS, initialAssignments)
+        list = getCache<Assignment[]>(CACHE_KEYS.ASSIGNMENTS, [])
       }
     } catch {
-      list = getCache<Assignment[]>(CACHE_KEYS.ASSIGNMENTS, initialAssignments)
+      list = getCache<Assignment[]>(CACHE_KEYS.ASSIGNMENTS, [])
     }
 
     if (filters?.subjectId) {
@@ -592,14 +589,14 @@ class AcademicService {
       if (filters?.eventType) params.set('eventType', filters.eventType)
       const qs = params.toString()
       const data = await apiFetch<AcademicEvent[]>(`/api/events${qs ? `?${qs}` : ''}`)
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         setCache(CACHE_KEYS.EVENTS, data)
         list = data
       } else {
-        list = getCache<AcademicEvent[]>(CACHE_KEYS.EVENTS, initialEvents)
+        list = getCache<AcademicEvent[]>(CACHE_KEYS.EVENTS, [])
       }
     } catch {
-      list = getCache<AcademicEvent[]>(CACHE_KEYS.EVENTS, initialEvents)
+      list = getCache<AcademicEvent[]>(CACHE_KEYS.EVENTS, [])
     }
 
     if (filters?.subjectId) list = list.filter((e) => e.subjectId === filters.subjectId)
@@ -674,14 +671,14 @@ class AcademicService {
       if (filters?.subjectId) params.set('subjectId', filters.subjectId)
       const qs = params.toString()
       const data = await apiFetch<Announcement[]>(`/api/announcements${qs ? `?${qs}` : ''}`)
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         setCache(CACHE_KEYS.ANNOUNCEMENTS, data)
         list = data
       } else {
-        list = getCache<Announcement[]>(CACHE_KEYS.ANNOUNCEMENTS, initialAnnouncements)
+        list = getCache<Announcement[]>(CACHE_KEYS.ANNOUNCEMENTS, [])
       }
     } catch {
-      list = getCache<Announcement[]>(CACHE_KEYS.ANNOUNCEMENTS, initialAnnouncements)
+      list = getCache<Announcement[]>(CACHE_KEYS.ANNOUNCEMENTS, [])
     }
     if (filters?.subjectId) list = list.filter((a) => a.subjectId === filters.subjectId)
     return list
@@ -753,14 +750,14 @@ class AcademicService {
       if (filters?.subjectId) params.set('subjectId', filters.subjectId)
       const qs = params.toString()
       const data = await apiFetch<Resource[]>(`/api/resources${qs ? `?${qs}` : ''}`)
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         setCache(CACHE_KEYS.RESOURCES, data)
         list = data
       } else {
-        list = getCache<Resource[]>(CACHE_KEYS.RESOURCES, initialResources)
+        list = getCache<Resource[]>(CACHE_KEYS.RESOURCES, [])
       }
     } catch {
-      list = getCache<Resource[]>(CACHE_KEYS.RESOURCES, initialResources)
+      list = getCache<Resource[]>(CACHE_KEYS.RESOURCES, [])
     }
     if (filters?.subjectId) list = list.filter((r) => r.subjectId === filters.subjectId)
     return list
@@ -815,14 +812,14 @@ class AcademicService {
       if (filters?.subjectId) params.set('subjectId', filters.subjectId)
       const qs = params.toString()
       const data = await apiFetch<StudyNote[]>(`/api/notes${qs ? `?${qs}` : ''}`)
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         setCache(CACHE_KEYS.NOTES, data)
         list = data
       } else {
-        list = getCache<StudyNote[]>(CACHE_KEYS.NOTES, initialStudyNotes)
+        list = getCache<StudyNote[]>(CACHE_KEYS.NOTES, [])
       }
     } catch {
-      list = getCache<StudyNote[]>(CACHE_KEYS.NOTES, initialStudyNotes)
+      list = getCache<StudyNote[]>(CACHE_KEYS.NOTES, [])
     }
     if (filters?.subjectId) list = list.filter((n) => n.subjectId === filters.subjectId)
     return list

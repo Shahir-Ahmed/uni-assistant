@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { ensureGuestUser } from '@/lib/guest-user'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const userId = await ensureGuestUser()
+    const userId = await ensureGuestUser(req)
     const subjects = await prisma.subject.findMany({
       where: { userId, isArchived: false },
       include: {
@@ -29,7 +29,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const userId = await ensureGuestUser()
+    const userId = await ensureGuestUser(req)
     const body = await req.json()
 
     const existingCount = await prisma.subject.count({ where: { userId } })

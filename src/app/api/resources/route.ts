@@ -4,7 +4,7 @@ import { ensureGuestUser } from '@/lib/guest-user'
 
 export async function GET(req: NextRequest) {
   try {
-    const userId = await ensureGuestUser()
+    const userId = await ensureGuestUser(req)
     const { searchParams } = new URL(req.url)
     const subjectId = searchParams.get('subjectId')
 
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const userId = await ensureGuestUser()
+    const userId = await ensureGuestUser(req)
     const body = await req.json()
 
     const resource = await prisma.resource.create({

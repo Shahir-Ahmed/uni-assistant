@@ -14,7 +14,11 @@ import {
   CheckCircle2,
   AlertTriangle,
   Sparkles,
+  User as UserIcon,
+  LogOut,
+  LogIn,
 } from "lucide-react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -29,8 +33,10 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter }
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { academicService } from "@/lib/academic-service"
+import { useAuth } from "@/lib/auth-context"
 
 export default function SettingsPage() {
+  const { user, logout } = useAuth()
   const [provider, setProvider] = React.useState("gemini")
   const [modelName, setModelName] = React.useState("gemini-2.5-flash")
   const [localEndpoint, setLocalEndpoint] = React.useState("http://localhost:11434/v1")
@@ -97,6 +103,88 @@ export default function SettingsPage() {
           <span>{statusMessage}</span>
         </div>
       )}
+
+      {/* Student Account & Environment Card */}
+      <Card className="shadow-sm border-border bg-gradient-to-br from-card via-card to-primary/5">
+        <CardHeader>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="space-y-1">
+              <CardTitle className="text-base font-bold flex items-center gap-2">
+                <UserIcon className="h-5 w-5 text-primary" />
+                <span>Student Account & Environment</span>
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Your coursework, notes, study materials, and AI interactions are permanently saved and isolated to your student profile.
+              </CardDescription>
+            </div>
+            {user ? (
+              <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary text-[11px] font-semibold w-fit">
+                Isolated Student Space
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="border-amber-400 bg-amber-50 text-amber-700 text-[11px] font-semibold w-fit">
+                Guest Environment
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {user ? (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-muted/40 border border-border/60">
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 rounded-xl bg-primary text-primary-foreground font-bold flex items-center justify-center text-lg shadow-sm">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="font-semibold text-sm text-foreground flex items-center gap-2">
+                    <span>{user.name}</span>
+                    <Badge variant="secondary" className="text-[10px] uppercase font-bold tracking-wider">
+                      {user.role || "Student"}
+                    </Badge>
+                  </div>
+                  <div className="text-xs text-muted-foreground">{user.email}</div>
+                  <div className="text-[11px] text-muted-foreground/80 mt-0.5">
+                    ID: <span className="font-mono">{user.id.slice(0, 16)}...</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={logout}
+                  className="text-xs text-destructive hover:bg-destructive/10 hover:text-destructive flex items-center gap-1.5"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span>Sign Out</span>
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-muted/40 border border-border/60">
+              <div>
+                <p className="text-sm font-semibold text-foreground">You are currently using ScholarOS as a Guest</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Sign in or create a student account to get your own private database environment with dedicated courses and history.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Link href="/login">
+                  <Button variant="outline" size="sm" className="text-xs flex items-center gap-1.5">
+                    <LogIn className="h-3.5 w-3.5" />
+                    <span>Sign In</span>
+                  </Button>
+                </Link>
+                <Link href="/signup">
+                  <Button size="sm" className="text-xs">
+                    Create Account
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* AI Provider Configuration Card */}
       <Card className="shadow-sm border-border">

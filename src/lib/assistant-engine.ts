@@ -181,7 +181,7 @@ class AssistantEngine {
       })
 
       return {
-        reply: `✅ **Document Successfully Stored & Indexed in Database!**\n\n* **Title:** ${resource.title}\n* **Subject:** ${targetSubject?.name || 'General'}\n* **File/Link:** [${actualFileName}](${attachment.fileUrl || '#'})\n* **Status:** Permanent in SQLite database. You can now ask questions about this document or practice quiz questions on it!`,
+        reply: `## Document Stored and Indexed\n\n* **Title:** ${resource.title}\n* **Subject:** ${targetSubject?.name || 'General'}\n* **File:** [${actualFileName}](${attachment.fileUrl || '#'})\n* **Status:** Successfully saved to your course materials.`,
         actionTaken: { type: 'RESOURCE_CREATED', title: resource.title, entity: resource },
       }
     }
@@ -189,11 +189,11 @@ class AssistantEngine {
     // Otherwise analyze content
     let preview = ''
     if (attachment.extractedText && attachment.extractedText.length > 20) {
-      preview = `\n\n📄 **Extracted Content Preview:**\n> "${attachment.extractedText.slice(0, 300).trim()}..."`
+      preview = `\n\n### Extracted Preview\n> "${attachment.extractedText.slice(0, 300).trim()}..."`
     }
 
     return {
-      reply: `📎 **Document Received & Analyzed!**\n* **File:** ${attachment.fileName} (${attachment.type})\n* **Location:** ${attachment.fileUrl || 'Local Upload'}${preview}\n\nI have analyzed this document. You can:\n1. Say **"Save this file to ${targetSubject?.name || 'my subject'}"** to store it in your course materials.\n2. Ask **"Explain key concepts from this document"**.\n3. Type **"Test me on this file"** for an interactive quiz.`,
+      reply: `## Document Analyzed\n\n* **File:** ${attachment.fileName} (${attachment.type})\n* **Location:** ${attachment.fileUrl || 'Local Upload'}${preview}\n\n**Next Steps:**\n* Ask: "Save this file to ${targetSubject?.name || 'my course'}"\n* Ask: "Explain key concepts from this document"\n* Ask: "Practice quiz on this document"`,
     }
   }
 
@@ -246,7 +246,7 @@ class AssistantEngine {
     })
 
     return {
-      reply: `🎉 **Subject Successfully Created in Database!**\n\n* **Course Name:** ${newSub.name}\n* **Course Code:** ${newSub.code || 'None'}\n* **Instructor:** ${newSub.instructor || 'TBD'}\n* **Semester:** ${newSub.semester}\n* **Database Status:** Permanent record written to SQLite database.\n\nYou can now assign deadlines, upload slides, and generate notes for **${newSub.name}**!`,
+      reply: `## Course Created\n\n* **Course Name:** ${newSub.name}\n* **Course Code:** ${newSub.code || 'None'}\n* **Instructor:** ${newSub.instructor || 'TBD'}\n* **Semester:** ${newSub.semester}`,
       actionTaken: { type: 'SUBJECT_CREATED', title: newSub.name, entity: newSub },
     }
   }
@@ -273,7 +273,7 @@ class AssistantEngine {
     })
 
     return {
-      reply: `✅ **Assignment Created & Stored in Database!**\n\n* **Title:** ${asg.title}\n* **Subject:** ${targetSubject?.name || 'General'}\n* **Deadline:** ${asg.deadline ? new Date(asg.deadline).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '7 days from now'}\n* **Priority:** ${asg.priority}\n* **Attachment/Link:** ${asg.submissionLink || 'None'}\n* **Database Status:** Permanent record saved with full audit history.`,
+      reply: `## Assignment Created\n\n* **Title:** ${asg.title}\n* **Subject:** ${targetSubject?.name || 'General'}\n* **Deadline:** ${asg.deadline ? new Date(asg.deadline).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '7 days from now'}\n* **Priority:** ${asg.priority}\n* **Submission Link:** ${asg.submissionLink || 'None'}`,
       actionTaken: { type: 'ASSIGNMENT_CREATED', title: asg.title, entity: asg },
     }
   }
@@ -322,7 +322,7 @@ class AssistantEngine {
     const topicsStr = topics.map((t) => `  * ${t}`).join('\n')
 
     return {
-      reply: `📅 **Assessment Scheduled & Saved to Database!**\n\n* **Title:** ${event.title}\n* **Type:** ${event.eventType}\n* **Subject:** ${targetSubject?.name || 'General'}\n* **Date & Time:** ${event.date ? new Date(event.date).toLocaleDateString() : 'Upcoming'} at ${event.startTime}\n* **Syllabus Topics Covered:**\n${topicsStr}\n* **Database Status:** Permanently linked to academic calendar & reminder engine.`,
+      reply: `## Assessment Scheduled\n\n* **Title:** ${event.title}\n* **Type:** ${event.eventType}\n* **Subject:** ${targetSubject?.name || 'General'}\n* **Date & Time:** ${event.date ? new Date(event.date).toLocaleDateString() : 'Upcoming'} at ${event.startTime}\n* **Syllabus Topics:**\n${topicsStr}`,
       actionTaken: { type: 'EVENT_CREATED', title: event.title, entity: event },
     }
   }
@@ -348,7 +348,7 @@ class AssistantEngine {
     })
 
     return {
-      reply: `📝 **Study Note Generated & Permanently Saved to Database!**\n\n* **Title:** ${note.title}\n* **Subject:** ${subject?.name || 'General'}\n* **Content Preview:**\n\n${note.content.slice(0, 450)}...\n\n*(Full note is saved to your Notes Library and accessible under ${subject?.name || 'Materials'} tab).*`,
+      reply: `## Study Guide Created\n\n* **Title:** ${note.title}\n* **Subject:** ${subject?.name || 'General'}\n\n### Content Preview\n\n${note.content.slice(0, 450)}...`,
       actionTaken: { type: 'NOTE_CREATED', title: note.title, entity: note },
     }
   }
@@ -368,7 +368,7 @@ class AssistantEngine {
     })
 
     return {
-      reply: `📢 **Announcement Captured in Database!**\n\n* **Message:** "${ann.originalMessage}"\n* **Subject:** ${subject?.name || 'General'}\n* **Category:** ${ann.category}\n* **Stored:** In your Capture Inbox & Review Queue.`,
+      reply: `## Announcement Recorded\n\n* **Message:** "${ann.originalMessage}"\n* **Subject:** ${subject?.name || 'General'}\n* **Category:** ${ann.category}`,
       actionTaken: { type: 'ANNOUNCEMENT_CREATED', title: ann.title || 'Announcement', entity: ann },
     }
   }
@@ -408,7 +408,7 @@ class AssistantEngine {
     )
 
     return {
-      reply: `🎉 **Assignment Marked as COMPLETED!**\n\n* **Assignment:** ${updated?.title || target.title}\n* **Subject:** ${target.subject?.name || 'Subject'}\n* **New Status:** COMPLETED ✅\n* **History:** Updated in database with completion audit timestamp.`,
+      reply: `## Assignment Completed\n\n* **Assignment:** ${updated?.title || target.title}\n* **Subject:** ${target.subject?.name || 'Subject'}\n* **Status:** COMPLETED`,
       actionTaken: { type: 'ASSIGNMENT_UPDATED', title: target.title, entity: updated },
     }
   }
@@ -424,7 +424,7 @@ class AssistantEngine {
 
     await academicService.deleteAssignment(target.id)
     return {
-      reply: `🗑️ **Assignment Deleted:** "${target.title}" has been permanently removed from the database.`,
+      reply: `## Assignment Removed\n\n"${target.title}" was removed from your database.`,
       actionTaken: { type: 'ASSIGNMENT_DELETED', title: target.title },
     }
   }
@@ -440,7 +440,7 @@ class AssistantEngine {
 
     await academicService.deleteStudyNote(target.id)
     return {
-      reply: `🗑️ **Study Note Deleted:** "${target.title}" removed from your notes library.`,
+      reply: `## Study Note Removed\n\n"${target.title}" was removed from your notes library.`,
     }
   }
 
@@ -462,7 +462,7 @@ class AssistantEngine {
       .join('\n\n')
 
     return {
-      reply: `📚 **Registered Academic Subjects (${subjects.length} active in Database):**\n\n${list}\n\nYou can ask me to inspect any of these courses, add assignments, or upload lecture slides!`,
+      reply: `## Registered Academic Subjects (${subjects.length})\n\n${list}`,
     }
   }
 
@@ -471,7 +471,7 @@ class AssistantEngine {
     const active = assignments.filter((a) => !['COMPLETED', 'SUBMITTED', 'CANCELLED'].includes(a.status))
 
     if (active.length === 0) {
-      return { reply: '🎉 You currently have zero pending assignments in the database! Everything is submitted or completed.' }
+      return { reply: 'You currently have zero pending assignments. Everything is completed or submitted.' }
     }
 
     const list = active
@@ -484,12 +484,12 @@ class AssistantEngine {
             minute: '2-digit',
           })
           : 'No deadline set'
-        return `• **${a.title}** (${a.subject?.name || 'Subject'})\n  * Due: **${dStr}** | Priority: **${a.priority}**\n  * Status: \`${a.status}\`${a.submissionLink ? ` | [Attached Link](${a.submissionLink})` : ''}`
+        return `* **${a.title}** (${a.subject?.name || 'Subject'})\n  - Due: **${dStr}** | Priority: **${a.priority}** | Status: ${a.status}${a.submissionLink ? ` | [Attached Link](${a.submissionLink})` : ''}`
       })
       .join('\n\n')
 
     return {
-      reply: `📋 **Active Academic Assignments (${active.length} pending in Database):**\n\n${list}\n\nType *"Mark [assignment name] as completed"* when finished!`,
+      reply: `## Active Assignments (${active.length} Pending)\n\n${list}`,
     }
   }
 
@@ -504,7 +504,7 @@ class AssistantEngine {
     const topicsList = (next.topics || []).map((t: any) => `  * ${t.topic || t}`).join('\n')
 
     return {
-      reply: `🎯 **Next Scheduled Assessment:**\n\n* **Title:** ${next.title} (${next.eventType})\n* **Subject:** ${next.subject?.name || 'Subject'}\n* **Date:** ${next.date ? new Date(next.date).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }) : 'TBD'} at ${next.startTime || 'TBD'}\n* **Location:** ${next.location || 'Classroom'}\n* **Topics to Prepare:**\n${topicsList}\n\nWould you like me to run an **interactive practice quiz session** on these topics right now?`,
+      reply: `## Next Scheduled Assessment\n\n* **Title:** ${next.title} (${next.eventType})\n* **Subject:** ${next.subject?.name || 'Subject'}\n* **Date:** ${next.date ? new Date(next.date).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }) : 'TBD'} at ${next.startTime || 'TBD'}\n* **Location:** ${next.location || 'Classroom'}\n* **Topics to Prepare:**\n${topicsList}`,
     }
   }
 
@@ -522,17 +522,17 @@ class AssistantEngine {
       return null
     }
 
-    let response = `🔍 **Grounded Results from your ScholarOS Database:**\n\n`
+    let response = `## Search Results\n\n`
 
     if (hasNotes) {
       const topNote = search.notes[0]
-      response += `### 📄 Matching Study Note: "${topNote.title}"\n`
+      response += `### Matching Study Note: "${topNote.title}"\n`
       response += `${topNote.content.slice(0, 600)}\n\n`
     }
 
     if (hasResources) {
       const topRes = search.resources[0]
-      response += `### 📑 Course Material: "${topRes.title}" (${topRes.fileName})\n`
+      response += `### Course Material: "${topRes.title}" (${topRes.fileName})\n`
       if (topRes.fileUrl) {
         response += `* File Link: [View Document](${topRes.fileUrl})\n`
       }
@@ -543,11 +543,9 @@ class AssistantEngine {
 
     if (hasAnnouncements) {
       const topAnn = search.announcements[0]
-      response += `### 📢 Relevant Announcement from ${topAnn.source || 'CR'}:\n`
+      response += `### Course Announcement (${topAnn.source || 'Instructor'}):\n`
       response += `> "${topAnn.originalMessage}"\n\n`
     }
-
-    response += `*Would you like me to generate a complete summary, practice quiz, or formula sheet from these materials?*`
 
     return { reply: response }
   }
@@ -562,7 +560,7 @@ class AssistantEngine {
     // 1. Database Normalization (1NF to BCNF)
     if (q.includes('normal') || q.includes('1nf') || q.includes('2nf') || q.includes('3nf') || q.includes('bcnf')) {
       return {
-        reply: `## 📚 Researched Academic Guide: Relational Database Normalization
+        reply: `## Relational Database Normalization
 
 Normalization minimizes data redundancy and avoids insert, update, and deletion anomalies.
 
@@ -586,7 +584,7 @@ Compute attribute closure $X^+$:
 $$X^+ = \\{ A \\mid X \\to A \\}$$
 If $X^+$ contains all attributes of relation $R$, $X$ is a superkey. If minimal, it is a **candidate key**.
 
-### 3. Exam Takeaway & Synthesis
+### 3. Key Takeaways
 * Always decompose relations to preserve **Lossless-Join Decomposition** ($R_1 \\cap R_2 \\to R_1$ or $R_1 \\cap R_2 \\to R_2$).
 * 3NF always guarantees dependency preservation; BCNF may not preserve all functional dependencies.`,
       }
@@ -595,7 +593,7 @@ If $X^+$ contains all attributes of relation $R$, $X$ is a superkey. If minimal,
     // 2. Banker's Algorithm & Deadlocks
     if (q.includes('banker') || q.includes('deadlock') || q.includes('coffman') || q.includes('safe state')) {
       return {
-        reply: `## 🛡️ Researched Academic Guide: Banker's Algorithm & Deadlock Avoidance
+        reply: `## Banker's Algorithm & Deadlock Avoidance
 
 ### 1. Four Necessary Conditions for Deadlock (Coffman Conditions)
 Deadlock occurs if and only if all four conditions hold simultaneously:
@@ -625,7 +623,7 @@ $$\\text{Need}[i][j] = \\text{Max}[i][j] - \\text{Allocation}[i][j]$$
     // 3. CPU Scheduling Algorithms
     if (q.includes('schedul') || q.includes('round robin') || q.includes('fcfs') || q.includes('sjf')) {
       return {
-        reply: `## ⚙️ Researched Academic Guide: CPU Scheduling Algorithms
+        reply: `## CPU Scheduling Algorithms
 
 ### 1. Comparison of Classical Algorithms
 
@@ -650,7 +648,7 @@ $$\\text{Need}[i][j] = \\text{Max}[i][j] - \\text{Allocation}[i][j]$$
     // 4. A* Search & Informed Search
     if (q.includes('a*') || q.includes('search') || q.includes('heuristic') || q.includes('manhattan') || q.includes('csp')) {
       return {
-        reply: `## 🧠 Researched Academic Guide: A* Search Algorithm & Heuristics
+        reply: `## A* Search Algorithm & Heuristics
 
 ### 1. Evaluation Function
 A* selects nodes that minimize total estimated cost:
@@ -677,19 +675,18 @@ $$f(n) = g(n) + h(n)$$
 
     // 5. Default General Academic Synthesizer
     return {
-      reply: `## 🎓 Academic Analysis: ${query}
+      reply: `## Academic Overview: ${query}
 
-### Overview & Core Concepts
-Regarding your inquiry on **"${query}"**:
-1. **Core Academic Principle:** This concept forms a foundational building block in current undergraduate and graduate university coursework.
+### Core Principles
+1. **Curriculum Classification:** Core university computer science / engineering foundation.
 2. **Theoretical Formulation:**
-   * In systems and software engineering, concepts are formalized through state spaces, relational mappings, and computational complexity bounds (such as $O(n \\log n)$ time and $O(1)$ auxiliary space).
-   * Ensuring deterministic, fault-tolerant execution requires verifying edge conditions, invariant preservation, and rigorous modular abstraction.
+   * Analyzed through formalized state models, algebraic bounds, and complexity guarantees (e.g. $O(n \\log n)$ time, $O(1)$ space).
+   * Verified by invariant preservation and deterministic execution guarantees.
 
-### Applied Study Recommendations
-* Review your registered lecture notes and slides in the **Materials** section.
-* To convert this topic into an active learning session, reply with **"Test me on this topic"** to start an interactive quiz!
-* To persist this topic into your database, type **"Create study note for ${query}"**.`,
+### Recommended Actions
+* Inspect enrolled course materials under the **Materials** tab.
+* Type "Practice quiz on this topic" to test understanding with interactive questions.
+* Type "Create study note for ${query}" to save a structured summary.`,
     }
   }
 
@@ -757,7 +754,7 @@ Regarding your inquiry on **"${query}"**:
     ]
 
     return {
-      reply: `🎯 **Interactive Practice Quiz Session Activated on ${topic}!**\n\nI have generated 3 high-yield assessment questions based on your course syllabus. Select your answers below:`,
+      reply: `## Interactive Practice Quiz: ${topic}\n\nThree assessment questions based on your course syllabus. Select your answers below:`,
       quizQuestions: questions,
     }
   }

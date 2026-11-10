@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     // 1. Gather live academic context from PostgreSQL database
     let academicContext = ""
     try {
-      const userId = await ensureGuestUser()
+      const userId = await ensureGuestUser(req)
       const [subjects, assignments, events, resources] = await Promise.all([
         prisma.subject.findMany({
           where: { userId, isArchived: false },
@@ -101,18 +101,19 @@ ${resourcesSummary || "None"}
 
     if (ai) {
       try {
-        const systemInstruction = `You are ScholarOS AI Academic Assistant, a university copilot powered by Google Gemini 2.5 (${GEMINI_MODEL}).
-You are connected directly to the student's academic database, course workspaces, lecture slides, assignments, and exam schedules.
+        const systemInstruction = `You are ScholarOS Academic Copilot, a high-level university assistant.
+You have direct read access to the student's academic database, course workspaces, lecture materials, assignments, and exam schedules.
 
 ${academicContext}
 
-GUIDELINES FOR YOUR RESPONSES:
-1. Provide accurate, clear, and deeply helpful answers.
-2. If the user asks about their assignments, deadlines, courses, or quizzes, reference the exact real data from their academic database above.
-3. If the user asks technical or academic questions (e.g. CPU Scheduling, Normalization, Banker's Algorithm, A* Search, TCP/IP, etc.), provide rigorous, beginner-friendly explanations with real-world intuitions, formulas, step-by-step procedures, and practice examples.
-4. If an attachment is provided, analyze the attached document or URL and synthesize key takeaways.
-5. If the user requests a quiz or practice questions (e.g., "quiz me", "test me on deadlocks"), generate a helpful explanation AND include 3-5 high-yield multiple choice questions with options and explanations.
-6. Use clean Markdown formatting with clear headers, bold keywords, and bullet points.`
+OUTPUT STRUCTURE & FORMATTING RULES:
+1. Deliver structured, clear, and professional responses.
+2. Use Markdown hierarchy: ## Section Title, ### Subsection, bullet points (* ), and clean Markdown tables for multi-item comparisons or schedules.
+3. Keep the tone concise, authoritative, and direct. Avoid conversational filler (e.g. do not say "Sure! Here is...", "I hope this helps!").
+4. Never include irrelevant decorative emojis, random symbols, or model self-references.
+5. Never include trailing disclaimers, signatures, or status notes (such as "*(Note: ...)*", "*(Powered by ...)*", or "Database status").
+6. When answering course/assignment/quiz questions, present the actual database facts in a neat table or structured bulleted list (Name, Course, Deadline, Priority, Status).
+7. For technical or academic queries (e.g., CPU scheduling, Normalization, Banker's algorithm, Search algorithms), provide rigorous theoretical foundations, exact formulas, step-by-step procedures, and concrete examples.`
 
         // Prepare contents
         const contents: any[] = []
@@ -154,7 +155,7 @@ GUIDELINES FOR YOUR RESPONSES:
           },
         })
 
-        const reply = response.text || "I processed your request using Gemini 2.5 Flash."
+        const reply = response.text || "Academic request processed successfully."
 
         // Check if practice quiz should be launched
         let quizQuestions: QuizQuestion[] | undefined = undefined
@@ -165,7 +166,6 @@ GUIDELINES FOR YOUR RESPONSES:
           lowerText.includes("test me") ||
           lowerText.includes("generate quiz")
         ) {
-          // Attempt structured quiz generation or fallback to heuristic quiz
           const localQuiz = await assistantEngine.process(userText, attachment)
           if (localQuiz.quizQuestions && localQuiz.quizQuestions.length > 0) {
             quizQuestions = localQuiz.quizQuestions
@@ -181,30 +181,21 @@ GUIDELINES FOR YOUR RESPONSES:
       } catch (geminiError: any) {
         console.error("Gemini API generation error:", geminiError)
 
-        // If quota, key, or network error occurs, fall back gracefully to local engine
+        // Fall back gracefully to local academic engine without trailing disclaimers
         const fallback = await assistantEngine.process(userText, attachment)
-        const isKeyError =
-          geminiError?.message?.includes("API key not valid") ||
-          geminiError?.status === "INVALID_ARGUMENT" ||
-          geminiError?.status === 400 ||
-          geminiError?.status === 403
-
-        const note = isKeyError
-          ? "Powered by ScholarOS Academic Engine. To connect live Gemini 2.5 Flash, verify your GEMINI_API_KEY in Settings > Secrets."
-          : "Powered by ScholarOS Academic Engine."
 
         return NextResponse.json({
-          reply: `${fallback.reply}\n\n*(${note})*`,
+          reply: fallback.reply,
           provider: "fallback",
           quizQuestions: fallback.quizQuestions,
         })
       }
     }
 
-    // 3. Fallback to local Assistant Engine when GEMINI_API_KEY is not set
+    // 3. Fallback to local Assistant Engine when GEMINI_API_KEY is not configured
     const fallbackResponse = await assistantEngine.process(userText, attachment)
     return NextResponse.json({
-      reply: `${fallbackResponse.reply}\n\n*(Powered by ScholarOS Academic Assistant • Gemini 2.5 Flash integrated)*`,
+      reply: fallbackResponse.reply,
       provider: "local-engine",
       model: GEMINI_MODEL,
       quizQuestions: fallbackResponse.quizQuestions,

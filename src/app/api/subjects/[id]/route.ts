@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { ensureGuestUser } from '@/lib/guest-user'
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const userId = await ensureGuestUser()
+    const userId = await ensureGuestUser(req)
     const subject = await prisma.subject.findFirst({
       where: { id, userId },
       include: {
@@ -30,7 +30,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const userId = await ensureGuestUser()
+    const userId = await ensureGuestUser(req)
     const body = await req.json()
 
     const subject = await prisma.subject.updateMany({
@@ -73,10 +73,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const userId = await ensureGuestUser()
+    const userId = await ensureGuestUser(req)
     await prisma.subject.deleteMany({ where: { id, userId } })
     return NextResponse.json({ success: true })
   } catch (error: any) {

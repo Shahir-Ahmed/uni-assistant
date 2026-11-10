@@ -33,6 +33,7 @@ import { academicService } from "@/lib/academic-service"
 import { AIMessage, QuizQuestion } from "@/types"
 import { UnifiedFileInput, FileAttachment } from "@/components/ui/file-input"
 import { assistantEngine } from "@/lib/assistant-engine"
+import { StructuredMessage } from "@/components/chat/StructuredMessage"
 
 function AssistantContent() {
   const searchParams = useSearchParams()
@@ -43,15 +44,14 @@ function AssistantContent() {
     {
       id: "msg-welcome",
       role: "assistant",
-      content: `Hello! I am your ScholarOS Personal Academic Assistant, powered by Google Gemini 2.5 Flash.
-I am connected directly to your university database, assignments, lecture slides, and academic calendar.
+      content: `Welcome to your Academic Copilot.
+Connected directly to your university courses, assignments, and exam schedule.
 
-Here are a few things you can do:
-* Ask questions about your courses, deadlines, and syllabus
+Suggested queries:
 * "What assignments do I have this week?"
 * "When is my next quiz and what topics does it cover?"
-* "Quiz me on CPU scheduling and deadlocks"
-* Attach or drag & drop lecture slides or PDFs to summarize and generate study notes`,
+* "Explain CPU scheduling algorithms and turnaround metrics"
+* Attach lecture slides or PDF notes to extract key concepts and generate study guides.`,
       timestamp: new Date(),
     },
   ])
@@ -70,6 +70,100 @@ Here are a few things you can do:
   const [showAnswerFeedback, setShowAnswerFeedback] = React.useState(false)
   const [score, setScore] = React.useState(0)
 
+  const messagesRef = React.useRef(messages)
+  messagesRef.current = messages
+
+  const handleUserSubmit = React.useCallback(
+    async (userText: string, attachedFile?: FileAttachment | null) => {
+      const text = userText.trim()
+      const activeAttachment = attachedFile !== undefined ? attachedFile : currentAttachment
+
+      if (!text && !activeAttachment) return
+
+      const userMsg: AIMessage = {
+        id: `msg-${Date.now()}`,
+        role: "user",
+        content: text || (activeAttachment ? `Analyzed document: ${activeAttachment.fileName}` : ""),
+        timestamp: new Date(),
+        attachment: activeAttachment
+          ? {
+              fileName: activeAttachment.fileName,
+              fileUrl: activeAttachment.fileUrl,
+              fileSize: activeAttachment.fileSize,
+              type: activeAttachment.type,
+            }
+          : undefined,
+      }
+
+      setMessages((prev) => [...prev, userMsg])
+      setInput("")
+      setCurrentAttachment(null)
+      setShowAttachPanel(false)
+      setIsTyping(true)
+
+      try {
+        const res = await fetch("/api/assistant/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: text,
+            attachment: activeAttachment,
+            history: messagesRef.current.slice(-4).map((m) => ({ role: m.role, content: m.content })),
+          }),
+        })
+
+        let response: { reply: string; quizQuestions?: QuizQuestion[]; model?: string }
+        if (res.ok) {
+          response = await res.json()
+        } else {
+          response = await assistantEngine.process(text, activeAttachment)
+        }
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg-${Date.now() + 1}`,
+            role: "assistant",
+            content: response.reply,
+            timestamp: new Date(),
+          },
+        ])
+
+        if (response.quizQuestions && response.quizQuestions.length > 0) {
+          setQuizQuestions(response.quizQuestions)
+          setCurrentQuestionIndex(0)
+          setUserSelectedOption(null)
+          setShowAnswerFeedback(false)
+          setScore(0)
+          setQuizActive(true)
+        }
+      } catch (err) {
+        console.error("Failed to process assistant command via API, using fallback:", err)
+        const fallback = await assistantEngine.process(text, activeAttachment)
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg-${Date.now() + 1}`,
+            role: "assistant",
+            content: fallback.reply,
+            timestamp: new Date(),
+          },
+        ])
+        if (fallback.quizQuestions && fallback.quizQuestions.length > 0) {
+          setQuizQuestions(fallback.quizQuestions)
+          setCurrentQuestionIndex(0)
+          setUserSelectedOption(null)
+          setShowAnswerFeedback(false)
+          setScore(0)
+          setQuizActive(true)
+        }
+      } finally {
+        setIsTyping(false)
+      }
+    },
+    [currentAttachment]
+  )
+
   // Initialize with prep query if present
   React.useEffect(() => {
     if (prepQuery) {
@@ -77,95 +171,7 @@ Here are a few things you can do:
     } else if (subjectQuery) {
       handleUserSubmit(`Show me an overview of ${subjectQuery} including pending assignments and uploaded notes.`)
     }
-  }, [prepQuery, subjectQuery])
-
-  const handleUserSubmit = async (userText: string, attachedFile?: FileAttachment | null) => {
-    const text = userText.trim()
-    const activeAttachment = attachedFile !== undefined ? attachedFile : currentAttachment
-
-    if (!text && !activeAttachment) return
-
-    const userMsg: AIMessage = {
-      id: `msg-${Date.now()}`,
-      role: "user",
-      content: text || (activeAttachment ? `Analyzed document: ${activeAttachment.fileName}` : ""),
-      timestamp: new Date(),
-      attachment: activeAttachment
-        ? {
-            fileName: activeAttachment.fileName,
-            fileUrl: activeAttachment.fileUrl,
-            fileSize: activeAttachment.fileSize,
-            type: activeAttachment.type,
-          }
-        : undefined,
-    }
-
-    setMessages((prev) => [...prev, userMsg])
-    setInput("")
-    setCurrentAttachment(null)
-    setShowAttachPanel(false)
-    setIsTyping(true)
-
-    try {
-      const res = await fetch("/api/assistant/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          attachment: activeAttachment,
-          history: messages.slice(-4).map((m) => ({ role: m.role, content: m.content })),
-        }),
-      })
-
-      let response: { reply: string; quizQuestions?: QuizQuestion[]; model?: string }
-      if (res.ok) {
-        response = await res.json()
-      } else {
-        response = await assistantEngine.process(text, activeAttachment)
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `msg-${Date.now() + 1}`,
-          role: "assistant",
-          content: response.reply,
-          timestamp: new Date(),
-        },
-      ])
-
-      if (response.quizQuestions && response.quizQuestions.length > 0) {
-        setQuizQuestions(response.quizQuestions)
-        setCurrentQuestionIndex(0)
-        setUserSelectedOption(null)
-        setShowAnswerFeedback(false)
-        setScore(0)
-        setQuizActive(true)
-      }
-    } catch (err) {
-      console.error("Failed to process assistant command via API, using fallback:", err)
-      const fallback = await assistantEngine.process(text, activeAttachment)
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `msg-${Date.now() + 1}`,
-          role: "assistant",
-          content: fallback.reply,
-          timestamp: new Date(),
-        },
-      ])
-      if (fallback.quizQuestions && fallback.quizQuestions.length > 0) {
-        setQuizQuestions(fallback.quizQuestions)
-        setCurrentQuestionIndex(0)
-        setUserSelectedOption(null)
-        setShowAnswerFeedback(false)
-        setScore(0)
-        setQuizActive(true)
-      }
-    } finally {
-      setIsTyping(false)
-    }
-  }
+  }, [prepQuery, subjectQuery, handleUserSubmit])
 
   // Answer selection in quiz mode
   const handleSelectAnswer = (option: string) => {
@@ -214,65 +220,67 @@ Here are a few things you can do:
         </div>
 
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-xs bg-blue-50 dark:bg-blue-950/40 border-blue-400 text-blue-700 dark:text-blue-300 gap-1.5 py-1 font-semibold">
-            <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-            <span>Gemini 2.5 Flash</span>
-          </Badge>
-          <Badge variant="outline" className="text-xs bg-emerald-50 dark:bg-emerald-950 border-emerald-500 text-emerald-700 dark:text-emerald-300 gap-1.5 py-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Database Connected</span>
-          </Badge>
           <Button
             size="sm"
             variant="outline"
-            onClick={() => handleUserSubmit("What assignments do I have this week?")}
-            className="text-xs font-semibold gap-1.5"
+            onClick={() => {
+              setMessages([
+                {
+                  id: "msg-welcome",
+                  role: "assistant",
+                  content: "Welcome to your Academic Copilot. How can I assist with your coursework, assignments, or exam preparation today?",
+                  timestamp: new Date(),
+                },
+              ])
+              setQuizActive(false)
+            }}
+            className="text-xs font-semibold gap-1.5 h-8 px-3 rounded-lg"
           >
-            <Clock className="h-3.5 w-3.5 text-primary" />
-            <span>Upcoming Work</span>
+            <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
+            <span>New Chat</span>
           </Button>
         </div>
       </div>
 
       {/* Quick Action Pills */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
-        <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider shrink-0 mr-1">
-          Quick Actions:
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs no-scrollbar">
+        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider shrink-0 mr-1">
+          Suggested:
         </span>
         <button
           type="button"
           onClick={() => handleUserSubmit("What assignments do I have this week?")}
-          className="px-2.5 py-1 rounded-full border border-border bg-white dark:bg-card hover:border-primary/60 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-all text-[11px]"
+          className="px-3 py-1.5 rounded-lg border border-border bg-white dark:bg-card hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-colors text-xs shadow-xs"
         >
-          📋 Pending Work
+          Pending Work
         </button>
         <button
           type="button"
           onClick={() => handleUserSubmit("When is my next quiz and what topics does it cover?")}
-          className="px-2.5 py-1 rounded-full border border-border bg-white dark:bg-card hover:border-primary/60 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-all text-[11px]"
+          className="px-3 py-1.5 rounded-lg border border-border bg-white dark:bg-card hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-colors text-xs shadow-xs"
         >
-          🎯 Next Quiz
+          Next Assessment
         </button>
         <button
           type="button"
           onClick={() => handleUserSubmit("Add subject Cloud Computing (CS-408), instructor Dr. Farhan")}
-          className="px-2.5 py-1 rounded-full border border-border bg-white dark:bg-card hover:border-primary/60 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-all text-[11px]"
+          className="px-3 py-1.5 rounded-lg border border-border bg-white dark:bg-card hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-colors text-xs shadow-xs"
         >
-          ➕ Add Subject
+          Add Course
         </button>
         <button
           type="button"
           onClick={() => handleUserSubmit("Create study notes for Database Systems on BCNF vs 3NF with examples")}
-          className="px-2.5 py-1 rounded-full border border-border bg-white dark:bg-card hover:border-primary/60 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-all text-[11px]"
+          className="px-3 py-1.5 rounded-lg border border-border bg-white dark:bg-card hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-colors text-xs shadow-xs"
         >
-          📝 Generate BCNF Notes
+          Study Guide
         </button>
         <button
           type="button"
           onClick={() => handleUserSubmit("Practice quiz on Operating Systems")}
-          className="px-2.5 py-1 rounded-full border border-border bg-white dark:bg-card hover:border-primary/60 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-all text-[11px]"
+          className="px-3 py-1.5 rounded-lg border border-border bg-white dark:bg-card hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 font-medium shrink-0 transition-colors text-xs shadow-xs"
         >
-          ⚡ Practice Quiz
+          Practice Quiz
         </button>
       </div>
 
@@ -416,13 +424,13 @@ Here are a few things you can do:
                 )}
 
                 <div
-                  className={`p-4 rounded-2xl text-xs sm:text-sm leading-relaxed whitespace-pre-wrap shadow-sm ${
+                  className={`p-4 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-sm ${
                     msg.role === "user"
                       ? "bg-primary text-white rounded-br-none"
                       : "bg-gray-100 dark:bg-card border border-border text-gray-900 dark:text-gray-100 rounded-bl-none"
                   }`}
                 >
-                  {msg.content}
+                  <StructuredMessage content={msg.content} isUser={msg.role === "user"} />
                 </div>
               </div>
 
