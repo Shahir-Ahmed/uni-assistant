@@ -18,6 +18,7 @@ import {
   PlusCircle,
   LogOut,
   LogIn,
+  MessageCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -88,6 +89,14 @@ export function Sidebar({ onQuickCapture, className }: SidebarProps) {
       highlight: true,
     },
     {
+      title: "WhatsApp Sync",
+      href: "/whatsapp",
+      icon: MessageCircle,
+      highlight: true,
+      badge: "LIVE",
+      badgeVariant: "default" as const,
+    },
+    {
       title: "Search",
       href: "/search",
       icon: Search,
@@ -106,7 +115,10 @@ export function Sidebar({ onQuickCapture, className }: SidebarProps) {
   ]
 
   return (
-    <aside className={cn("hidden lg:flex flex-col w-64 border-r border-border bg-white dark:bg-card h-screen sticky top-0 shadow-sm z-30", className)}>
+    <aside
+      className={cn("hidden lg:flex flex-col w-64 border-r border-border bg-white dark:bg-card h-screen sticky top-0 shadow-sm z-30", className)}
+      suppressHydrationWarning
+    >
       {/* Brand Header */}
       <div className="p-5 border-b border-border flex items-center justify-between">
         <Link href="/" className="flex items-center space-x-3 group">

@@ -134,7 +134,8 @@ export async function getAuthenticatedUser(req?: Request | NextRequest | null): 
 }
 
 /**
- * Get current user ID from request, or fallback to default guest user if unauthenticated
+ * Get current authenticated user ID from request.
+ * Throws if the request is unauthenticated so every student's data stays strictly isolated.
  */
 export async function getCurrentUserId(req?: Request | NextRequest | null): Promise<string> {
   const user = await getAuthenticatedUser(req)
@@ -142,7 +143,11 @@ export async function getCurrentUserId(req?: Request | NextRequest | null): Prom
     return user.id
   }
 
-  // Fallback to guest user ID for backward compatibility or public demo mode
+  if (req) {
+    throw new Error("Unauthorized: Please sign up or sign in to access your private workspace.")
+  }
+
+  // Internal non-request usage fallback only
   const GUEST_USER_ID = "guest-user-scholar-os"
   const existing = await prisma.user.findUnique({
     where: { id: GUEST_USER_ID },
@@ -152,8 +157,8 @@ export async function getCurrentUserId(req?: Request | NextRequest | null): Prom
     await prisma.user.create({
       data: {
         id: GUEST_USER_ID,
-        name: "Guest Student",
-        email: "guest@scholar-os.local",
+        name: "System Student",
+        email: "system@scholar-os.local",
         timezone: "Asia/Karachi",
       },
     })

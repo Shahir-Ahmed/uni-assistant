@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
+import { ShieldCheck, Loader2 } from "lucide-react"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { Header } from "@/components/layout/Header"
 import { QuickCaptureModal } from "@/components/capture/QuickCaptureModal"
@@ -9,19 +10,63 @@ import { AuthProvider, useAuth } from "@/lib/auth-context"
 
 function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
   const { user, isLoading } = useAuth()
   const [captureOpen, setCaptureOpen] = React.useState(false)
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false)
 
+  React.useEffect(() => {
+    const handleOpenCapture = () => setCaptureOpen(true)
+    window.addEventListener("scholaros_open_capture", handleOpenCapture)
+    return () => window.removeEventListener("scholaros_open_capture", handleOpenCapture)
+  }, [])
+
   // Auth pages (login, signup) render standalone without the academic sidebar/header
   const isAuthPage = pathname === "/login" || pathname === "/signup"
 
+  React.useEffect(() => {
+    if (isLoading) return
+
+    if (!isAuthPage && !user) {
+      const nextParam = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : ""
+      router.replace(`/signup${nextParam}`)
+    } else if (isAuthPage && user) {
+      router.replace("/")
+    }
+  }, [isAuthPage, isLoading, user, pathname, router])
+
   if (isAuthPage) {
-    return <main className="min-h-screen w-full">{children}</main>
+    if (!isLoading && user) {
+      return (
+        <div className="min-h-screen w-full flex flex-col items-center justify-center bg-background gap-3">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <p className="text-xs font-medium text-muted-foreground">Entering your private workspace...</p>
+        </div>
+      )
+    }
+    return <main className="min-h-screen w-full" suppressHydrationWarning>{children}</main>
+  }
+
+  // Block unauthenticated rendering of private workspace content
+  if (isLoading || !user) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center bg-background px-4 text-center gap-3">
+        <div className="h-12 w-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
+          <ShieldCheck className="h-6 w-6" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-bold text-foreground">Verifying Private Academic Workspace</p>
+          <p className="text-xs text-muted-foreground">
+            {isLoading ? "Checking your isolated student session..." : "Redirecting to student registration..."}
+          </p>
+        </div>
+        <Loader2 className="h-4 w-4 animate-spin text-primary mt-1" />
+      </div>
+    )
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground antialiased flex w-full">
+    <div className="min-h-screen bg-background text-foreground antialiased flex w-full" suppressHydrationWarning>
       {/* Desktop Sidebar */}
       <Sidebar onQuickCapture={() => setCaptureOpen(true)} />
 

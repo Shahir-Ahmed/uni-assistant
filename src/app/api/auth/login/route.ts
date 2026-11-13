@@ -1,50 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
 import { verifyPassword, createSessionToken, SESSION_COOKIE_NAME } from "@/lib/auth"
-import { ensureGuestUser } from "@/lib/guest-user"
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { email, password, isDemo } = body
+    const { email, password } = body
 
-    // 1. One-click Demo Student Login
-    if (isDemo) {
-      const guestId = await ensureGuestUser()
-      const demoUser = await prisma.user.findUnique({
-        where: { id: guestId },
-        select: { id: true, name: true, email: true },
-      })
-
-      if (!demoUser) {
-        return NextResponse.json({ error: "Demo user not available." }, { status: 500 })
-      }
-
-      const token = createSessionToken({
-        id: demoUser.id,
-        email: demoUser.email || "demo@scholar-os.local",
-        name: demoUser.name || "Demo Student",
-      })
-
-      const response = NextResponse.json({
-        user: demoUser,
-        message: "Signed in to demo student workspace.",
-      })
-
-      response.cookies.set({
-        name: SESSION_COOKIE_NAME,
-        value: token,
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-        maxAge: 30 * 24 * 60 * 60,
-      })
-
-      return response
-    }
-
-    // 2. Standard Student Login
     if (!email || !password) {
       return NextResponse.json(
         { error: "Please provide both student email and password." },

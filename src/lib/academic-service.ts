@@ -402,7 +402,7 @@ class AcademicService {
     }
 
     // Immediately persist locally
-    const current = getCache<Subject[]>(CACHE_KEYS.SUBJECTS, initialSubjects)
+    const current = getCache<Subject[]>(CACHE_KEYS.SUBJECTS, [])
     const updated = [localSubject, ...current]
     setCache(CACHE_KEYS.SUBJECTS, updated)
 
@@ -421,7 +421,7 @@ class AcademicService {
   }
 
   async updateSubject(id: string, updates: Partial<Subject>): Promise<Subject | null> {
-    const current = getCache<Subject[]>(CACHE_KEYS.SUBJECTS, initialSubjects)
+    const current = getCache<Subject[]>(CACHE_KEYS.SUBJECTS, [])
     const idx = current.findIndex((s) => s.id === id)
     let updatedItem: Subject | null = null
     if (idx !== -1) {
@@ -446,7 +446,7 @@ class AcademicService {
   }
 
   async deleteSubject(id: string): Promise<boolean> {
-    const current = getCache<Subject[]>(CACHE_KEYS.SUBJECTS, initialSubjects)
+    const current = getCache<Subject[]>(CACHE_KEYS.SUBJECTS, [])
     const filtered = current.filter((s) => s.id !== id)
     setCache(CACHE_KEYS.SUBJECTS, filtered)
 

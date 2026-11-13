@@ -17,6 +17,7 @@ import {
   MessageSquare,
   CheckSquare,
   ExternalLink,
+  MessageCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
@@ -24,7 +25,6 @@ import { Badge } from "@/components/ui/badge"
 import { academicService } from "@/lib/academic-service"
 import { Subject, Assignment, AcademicEvent, Announcement, Resource } from "@/types"
 import { formatDate, formatRelativeDate, getPriorityColor, getStatusColor, isOverdue } from "@/lib/utils"
-import { QuickCaptureModal } from "@/components/capture/QuickCaptureModal"
 
 export default function DashboardPage() {
   const [subjects, setSubjects] = React.useState<Subject[]>([])
@@ -32,7 +32,6 @@ export default function DashboardPage() {
   const [events, setEvents] = React.useState<AcademicEvent[]>([])
   const [announcements, setAnnouncements] = React.useState<Announcement[]>([])
   const [resources, setResources] = React.useState<Resource[]>([])
-  const [captureOpen, setCaptureOpen] = React.useState(false)
   const [loading, setLoading] = React.useState(true)
 
   const loadData = React.useCallback(async () => {
@@ -59,6 +58,9 @@ export default function DashboardPage() {
 
   React.useEffect(() => {
     loadData()
+    const handleDataUpdate = () => loadData()
+    window.addEventListener("scholaros_data_updated", handleDataUpdate)
+    return () => window.removeEventListener("scholaros_data_updated", handleDataUpdate)
   }, [loadData])
 
   // Computed metrics for dashboard
@@ -99,8 +101,17 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <Link href="/whatsapp">
+            <Button
+              className="bg-emerald-500 hover:bg-emerald-600 text-emerald-950 font-bold shadow-sm h-10 px-4 rounded-xl gap-2"
+            >
+              <MessageCircle className="h-4 w-4" />
+              <span>WhatsApp Live</span>
+            </Button>
+          </Link>
+
           <Button
-            onClick={() => setCaptureOpen(true)}
+            onClick={() => window.dispatchEvent(new CustomEvent("scholaros_open_capture"))}
             className="bg-white text-primary hover:bg-white/90 font-semibold shadow-sm h-10 px-4 rounded-xl gap-2"
           >
             <PlusCircle className="h-4 w-4 text-primary" />
@@ -113,7 +124,7 @@ export default function DashboardPage() {
             className="bg-white/10 hover:bg-white/20 border-white/30 text-white font-medium h-10 px-4 rounded-xl gap-2"
           >
             <Bot className="h-4 w-4" />
-            <span>Ask AI Assistant</span>
+            <span>Ask AI</span>
           </Button>
         </div>
       </div>
@@ -397,13 +408,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Quick Capture Modal Instance */}
-      <QuickCaptureModal
-        open={captureOpen}
-        onOpenChange={setCaptureOpen}
-        onSuccess={() => loadData()}
-      />
     </div>
   )
 }

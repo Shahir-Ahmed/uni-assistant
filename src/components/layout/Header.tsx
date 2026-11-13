@@ -65,7 +65,7 @@ export function Header({ onQuickCapture, onToggleMobileNav }: HeaderProps) {
   }
 
   return (
-    <header className="h-16 border-b border-border bg-white/80 dark:bg-card/80 backdrop-blur-md sticky top-0 z-20 px-4 sm:px-6 flex items-center justify-between">
+    <header className="h-16 border-b border-border bg-white/80 dark:bg-card/80 backdrop-blur-md sticky top-0 z-20 px-4 sm:px-6 flex items-center justify-between" suppressHydrationWarning>
       {/* Mobile Menu Trigger & Title */}
       <div className="flex items-center gap-3">
         <Button
@@ -155,7 +155,9 @@ export function Header({ onQuickCapture, onToggleMobileNav }: HeaderProps) {
           title="Toggle Dark Mode"
           suppressHydrationWarning
         >
-          {mounted && isDark ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4" />}
+          <span className="flex items-center justify-center" suppressHydrationWarning>
+            {mounted && isDark ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4" />}
+          </span>
         </Button>
 
         {/* Student Profile / Auth Dropdown */}

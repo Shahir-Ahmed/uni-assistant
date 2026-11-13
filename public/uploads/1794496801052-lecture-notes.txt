@@ -1,0 +1,2 @@
+CS-301 Lecture Slides: Virtual Memory & Page Tables
+Formula: EAT = (1 - p) * ma + p * page_fault_time

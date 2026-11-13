@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
+import { ensureGuestUser } from '@/lib/guest-user'
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureGuestUser(req)
     const formData = await req.formData()
     const file = formData.get('file') as File | null
 

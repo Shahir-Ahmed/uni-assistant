@@ -143,6 +143,8 @@ export function QuickCaptureModal({ open, onOpenChange, onSuccess }: QuickCaptur
     }
   }
 
+  if (!open) return null
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">

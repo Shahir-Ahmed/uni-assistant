@@ -12,6 +12,8 @@ import {
   Loader2,
   Globe,
   Paperclip,
+  FileCode,
+  FolderOpen,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -42,7 +44,7 @@ export interface UnifiedFileInputProps {
 export function UnifiedFileInput({
   value,
   onChange,
-  accept = ".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.csv,.xls,.xlsx,.png,.jpg,.jpeg",
+  accept = ".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.csv,.xls,.xlsx,.png,.jpg,.jpeg,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/*,image/*",
   maxSizeMB = 50,
   label = "Attach File or Document Link",
   description,
@@ -54,8 +56,10 @@ export function UnifiedFileInput({
   const [urlInput, setUrlInput] = React.useState("")
   const [isDragging, setIsDragging] = React.useState(false)
   const [isUploading, setIsUploading] = React.useState(false)
+  const [uploadProgress, setUploadProgress] = React.useState(0)
   const [uploadError, setUploadError] = React.useState<string | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const inputId = React.useId()
 
   // Sync internal URL state with external value if it's a URL
   React.useEffect(() => {
@@ -73,14 +77,20 @@ export function UnifiedFileInput({
     }
 
     setIsUploading(true)
+    setUploadProgress(20)
+
     try {
       const formData = new FormData()
       formData.append("file", file)
+
+      setUploadProgress(50)
 
       const res = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       })
+
+      setUploadProgress(85)
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ error: "Upload failed" }))
@@ -88,6 +98,7 @@ export function UnifiedFileInput({
       }
 
       const data = await res.json()
+      setUploadProgress(100)
 
       onChange({
         type: "FILE",
@@ -99,9 +110,10 @@ export function UnifiedFileInput({
       })
     } catch (err: any) {
       console.error("Upload error:", err)
-      setUploadError(err.message || "Failed to upload file")
+      setUploadError(err.message || "Failed to upload file. Please try again.")
     } finally {
       setIsUploading(false)
+      setUploadProgress(0)
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
       }
@@ -147,7 +159,7 @@ export function UnifiedFileInput({
 
     setUploadError(null)
 
-    // Parse simple file name from URL
+    // Parse friendly file name from URL
     let derivedName = "Linked Resource"
     try {
       const parsedUrl = new URL(trimmed)
@@ -158,7 +170,6 @@ export function UnifiedFileInput({
         derivedName = parsedUrl.hostname
       }
     } catch {
-      // not a strict full URL (e.g. university intranet or drive shorthand)
       const parts = trimmed.split("/")
       derivedName = parts[parts.length - 1] || trimmed
     }
@@ -186,7 +197,8 @@ export function UnifiedFileInput({
     if (value.type === "URL") return <Globe className="h-5 w-5 text-blue-500" />
     const ext = value.fileName.toLowerCase()
     if (ext.endsWith(".pdf")) return <FileText className="h-5 w-5 text-red-500" />
-    if (ext.match(/\.(png|jpg|jpeg|gif|webp)$/)) return <ImageIcon className="h-5 w-5 text-emerald-500" />
+    if (ext.match(/\.(png|jpg|jpeg|gif|webp|svg)$/)) return <ImageIcon className="h-5 w-5 text-emerald-500" />
+    if (ext.match(/\.(py|js|ts|tsx|jsx|json|html|css|cpp|c|java|sql)$/)) return <FileCode className="h-5 w-5 text-amber-500" />
     return <FileIcon className="h-5 w-5 text-primary" />
   }
 
@@ -197,7 +209,7 @@ export function UnifiedFileInput({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
-  // If a file or URL is already attached, show the active preview card
+  // 1. Attached Preview Card
   if (value) {
     return (
       <div className={`space-y-1.5 ${className}`}>
@@ -212,7 +224,7 @@ export function UnifiedFileInput({
                 <span className="font-semibold text-xs text-gray-900 dark:text-gray-100 truncate block max-w-[220px] sm:max-w-xs">
                   {value.fileName}
                 </span>
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-primary/40 text-primary uppercase">
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-primary/40 text-primary uppercase font-bold">
                   {value.type}
                 </Badge>
               </div>
@@ -249,25 +261,31 @@ export function UnifiedFileInput({
     )
   }
 
-  // Compact input (ideal for chatbars or tight modal footers)
+  // 2. Compact Mode (for chat bars, tight action modals)
   if (compact) {
     return (
       <div className={`space-y-2 ${className}`}>
+        <input
+          ref={fileInputRef}
+          id={inputId}
+          type="file"
+          accept={accept}
+          onChange={handleFileChange}
+          onClick={(e) => e.stopPropagation()}
+          className="sr-only"
+        />
         <div className="flex items-center gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={accept}
-            onChange={handleFileChange}
-            className="hidden"
-          />
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              fileInputRef.current?.click()
+            }}
             disabled={isUploading}
-            className="text-xs h-8 gap-1.5 font-medium"
+            className="text-xs h-8 gap-1.5 font-medium shrink-0"
           >
             {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
             <span>Upload File</span>
@@ -304,12 +322,23 @@ export function UnifiedFileInput({
     )
   }
 
-  // Full-featured mode (ideal for dialogs and creation forms)
+  // 3. Full-featured Dropzone Mode
   return (
     <div className={`space-y-2.5 ${className}`}>
+      {/* Hidden file input with stopPropagation */}
+      <input
+        ref={fileInputRef}
+        id={inputId}
+        type="file"
+        accept={accept}
+        onChange={handleFileChange}
+        onClick={(e) => e.stopPropagation()}
+        className="sr-only"
+      />
+
       {label && (
         <div className="flex items-center justify-between">
-          <Label className="text-xs font-semibold">{label}</Label>
+          <Label className="text-xs font-semibold text-gray-900 dark:text-gray-100">{label}</Label>
           <div className="flex rounded-lg border border-border p-0.5 bg-gray-100/70 dark:bg-card">
             <button
               type="button"
@@ -333,7 +362,7 @@ export function UnifiedFileInput({
               }`}
             >
               <LinkIcon className="h-3 w-3" />
-              <span>Document URL</span>
+              <span>Document Link</span>
             </button>
           </div>
         </div>
@@ -347,41 +376,60 @@ export function UnifiedFileInput({
           onDragEnter={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          onClick={() => !isUploading && fileInputRef.current?.click()}
-          className={`cursor-pointer border-2 border-dashed rounded-xl p-5 text-center transition-all flex flex-col items-center justify-center gap-2 ${
+          onClick={(e) => {
+            // Only trigger click if not uploading and not clicked from child button
+            if (!isUploading) {
+              fileInputRef.current?.click()
+            }
+          }}
+          className={`cursor-pointer border-2 border-dashed rounded-xl p-5 text-center transition-all flex flex-col items-center justify-center gap-3 relative select-none ${
             isDragging
               ? "border-primary bg-primary/10 scale-[1.01]"
-              : "border-border hover:border-primary/50 bg-gray-50/50 dark:bg-card/40"
+              : "border-border hover:border-primary/60 bg-gray-50/60 dark:bg-card/40 hover:bg-primary/5"
           }`}
         >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={accept}
-            onChange={handleFileChange}
-            className="hidden"
-          />
-
           {isUploading ? (
-            <div className="flex flex-col items-center gap-2 py-2">
-              <Loader2 className="h-7 w-7 text-primary animate-spin" />
-              <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">
-                Uploading and processing document...
-              </span>
+            <div className="flex flex-col items-center gap-2 py-3">
+              <Loader2 className="h-8 w-8 text-primary animate-spin" />
+              <div className="space-y-1">
+                <span className="text-xs font-bold text-gray-800 dark:text-gray-200 block">
+                  Uploading and indexing document...
+                </span>
+                <div className="w-36 h-1.5 bg-muted rounded-full overflow-hidden mx-auto">
+                  <div
+                    className="h-full bg-primary transition-all duration-300 rounded-full"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+              </div>
             </div>
           ) : (
             <>
-              <div className="h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center">
+              <div className="h-11 w-11 rounded-full bg-primary/10 text-primary flex items-center justify-center shadow-xs">
                 <Upload className="h-5 w-5" />
               </div>
-              <div className="space-y-0.5">
+              <div className="space-y-1">
                 <p className="text-xs font-bold text-gray-800 dark:text-gray-200">
-                  Click to upload or drag & drop file here
+                  Drag &amp; drop file here, or click to browse
                 </p>
-                <p className="text-[11px] text-muted-foreground">
-                  Supports PDF, PowerPoint, Word, Images, Notes, Code (up to {maxSizeMB}MB)
+                <p className="text-[11px] text-muted-foreground max-w-sm">
+                  PDF slides, lecture docs, presentations, homework briefs, images (up to {maxSizeMB}MB)
                 </p>
               </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  fileInputRef.current?.click()
+                }}
+                className="text-xs font-semibold h-8 px-4 gap-1.5 shadow-xs border-primary/30 text-primary hover:bg-primary hover:text-white"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                <span>Browse Files</span>
+              </Button>
             </>
           )}
         </div>
@@ -419,8 +467,14 @@ export function UnifiedFileInput({
         </div>
       )}
 
-      {uploadError && <p className="text-xs text-red-500 font-medium">{uploadError}</p>}
+      {uploadError && (
+        <div className="p-2.5 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 text-xs text-red-700 dark:text-red-300 font-medium flex items-center justify-between">
+          <span>{uploadError}</span>
+          <button type="button" onClick={() => setUploadError(null)} className="text-red-500 hover:text-red-700">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
-

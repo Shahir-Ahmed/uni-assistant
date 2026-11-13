@@ -2,15 +2,29 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { GraduationCap, ArrowRight, Lock, Mail, AlertCircle, Sparkles, CheckCircle2 } from "lucide-react"
+import { useSearchParams } from "next/navigation"
+import {
+  GraduationCap,
+  ArrowRight,
+  Lock,
+  Mail,
+  AlertCircle,
+  CheckCircle2,
+  ShieldCheck,
+  MessageCircle,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card"
 import { useAuth } from "@/lib/auth-context"
 
-export default function LoginPage() {
-  const { login, loginAsDemo, isLoading } = useAuth()
+function LoginPageInner() {
+  const { login, isLoading } = useAuth()
+  const searchParams = useSearchParams()
+  const rawNext = searchParams.get("next")
+  const redirectTo = rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/"
+
   const [email, setEmail] = React.useState("")
   const [password, setPassword] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
@@ -27,21 +41,9 @@ export default function LoginPage() {
 
     setSubmitting(true)
     try {
-      await login(email, password)
+      await login(email, password, redirectTo)
     } catch (err: any) {
       setError(err.message || "Failed to sign in. Please verify your credentials.")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const handleDemoLogin = async () => {
-    setError(null)
-    setSubmitting(true)
-    try {
-      await loginAsDemo()
-    } catch (err: any) {
-      setError(err.message || "Failed to start demo workspace.")
     } finally {
       setSubmitting(false)
     }
@@ -59,16 +61,19 @@ export default function LoginPage() {
             Scholar<span className="text-secondary-600 font-extrabold">OS</span>
           </h1>
           <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
-            University Academic Command Center
+            Private University Academic Command Center
           </p>
         </div>
 
         {/* Login Card */}
         <Card className="border border-border shadow-sm">
           <CardHeader className="space-y-1 pb-4">
-            <CardTitle className="text-xl font-bold tracking-tight">Student Sign In</CardTitle>
+            <CardTitle className="text-xl font-bold tracking-tight flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+              <span>Student Sign In</span>
+            </CardTitle>
             <CardDescription className="text-xs text-muted-foreground">
-              Enter your student credentials to access your isolated workspace
+              Enter your credentials to unlock your private, isolated academic workspace
             </CardDescription>
           </CardHeader>
 
@@ -101,11 +106,9 @@ export default function LoginPage() {
               </div>
 
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password" className="text-xs font-semibold">
-                    Password
-                  </Label>
-                </div>
+                <Label htmlFor="password" className="text-xs font-semibold">
+                  Password
+                </Label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -126,43 +129,41 @@ export default function LoginPage() {
                 disabled={submitting || isLoading}
                 className="w-full h-10 text-xs font-semibold bg-primary hover:bg-primary-700 text-white rounded-lg gap-2 shadow-xs"
               >
-                {submitting ? "Signing In..." : "Sign In to Workspace"}
+                {submitting ? "Signing In..." : "Sign In to Private Workspace"}
                 <ArrowRight className="h-3.5 w-3.5" />
               </Button>
             </form>
 
-            <div className="relative my-4">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-border" />
+            {/* New User Onboarding Callout */}
+            <div className="p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-950/20 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                <MessageCircle className="h-4 w-4 text-emerald-600" />
+                <span>New to ScholarOS?</span>
               </div>
-              <div className="relative flex justify-center text-[10px] uppercase tracking-wider">
-                <span className="bg-white dark:bg-card px-2 text-muted-foreground font-semibold">
-                  Or instant access
-                </span>
-              </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Sign up with WhatsApp integration permission to create your own private academic space with isolated storage.
+              </p>
+              <Link href="/signup" className="block">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full h-9 text-xs font-semibold border-emerald-500/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/60 dark:hover:bg-emerald-950/40 gap-1.5"
+                >
+                  <span>Sign Up &amp; Connect WhatsApp</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Button>
+              </Link>
             </div>
-
-            {/* Quick Demo Access Button */}
-            <Button
-              type="button"
-              variant="outline"
-              disabled={submitting || isLoading}
-              onClick={handleDemoLogin}
-              className="w-full h-10 text-xs font-medium border-border hover:bg-gray-50 dark:hover:bg-muted text-gray-700 dark:text-gray-200 rounded-lg gap-2"
-            >
-              <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-              <span>Explore Demo Student Environment</span>
-            </Button>
           </CardContent>
 
           <CardFooter className="pt-2 pb-6 flex justify-center border-t border-border/60">
             <p className="text-xs text-muted-foreground">
-              New student?{" "}
+              Need a private student account?{" "}
               <Link
                 href="/signup"
                 className="font-semibold text-primary hover:text-primary-700 underline underline-offset-4"
               >
-                Create your student environment
+                Register with WhatsApp permission
               </Link>
             </p>
           </CardFooter>
@@ -172,14 +173,28 @@ export default function LoginPage() {
         <div className="grid grid-cols-2 gap-3 text-center text-[11px] text-muted-foreground">
           <div className="p-2.5 rounded-lg border border-border/60 bg-white/50 dark:bg-card/50 flex items-center justify-center gap-1.5">
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-            <span>Dedicated Environment</span>
+            <span>Private &amp; Isolated</span>
           </div>
           <div className="p-2.5 rounded-lg border border-border/60 bg-white/50 dark:bg-card/50 flex items-center justify-center gap-1.5">
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-            <span>Permanent Storage</span>
+            <span>WhatsApp Sync Ready</span>
           </div>
         </div>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-background text-xs text-muted-foreground">
+          Loading sign in...
+        </div>
+      }
+    >
+      <LoginPageInner />
+    </React.Suspense>
   )
 }

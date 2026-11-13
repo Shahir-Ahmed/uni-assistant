@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useRouter, usePathname } from "next/navigation"
+import { useRouter } from "next/navigation"
 
 export interface UserProfile {
   id: string
@@ -11,18 +11,26 @@ export interface UserProfile {
   timezone?: string
 }
 
+export interface RegisterPayload {
+  name: string
+  email: string
+  password: string
+  semester?: string
+  major?: string
+  whatsappPermissionGranted: boolean
+  whatsappPhone?: string
+  whatsappPaired?: boolean
+  autoSyncAssignments?: boolean
+  autoSyncQuizzes?: boolean
+  autoSyncNotes?: boolean
+  filterChitChat?: boolean
+}
+
 interface AuthContextType {
   user: UserProfile | null
   isLoading: boolean
-  login: (email: string, password: string) => Promise<void>
-  loginAsDemo: () => Promise<void>
-  register: (data: {
-    name: string
-    email: string
-    password: string
-    semester?: string
-    major?: string
-  }) => Promise<void>
+  login: (email: string, password: string, redirectTo?: string) => Promise<void>
+  register: (data: RegisterPayload, redirectTo?: string) => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
 }
@@ -33,11 +41,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<UserProfile | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
   const router = useRouter()
-  const pathname = usePathname()
 
   const refreshUser = React.useCallback(async () => {
     try {
-      const res = await fetch("/api/auth/me")
+      const res = await fetch("/api/auth/me", { cache: "no-store" })
       if (res.ok) {
         const data = await res.json()
         setUser(data.user)
@@ -56,7 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshUser()
   }, [refreshUser])
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, redirectTo = "/") => {
     setIsLoading(true)
     try {
       const res = await fetch("/api/auth/login", {
@@ -72,48 +79,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       setUser(data.user)
       if (typeof window !== "undefined") {
-        // Clear local caches to avoid data mixing
         localStorage.clear()
         window.dispatchEvent(new Event("scholaros_auth_changed"))
       }
-      router.push("/")
+      router.replace(redirectTo)
     } finally {
       setIsLoading(false)
     }
   }
 
-  const loginAsDemo = async () => {
-    setIsLoading(true)
-    try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isDemo: true }),
-      })
-
-      const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to sign in to demo.")
-      }
-
-      setUser(data.user)
-      if (typeof window !== "undefined") {
-        localStorage.clear()
-        window.dispatchEvent(new Event("scholaros_auth_changed"))
-      }
-      router.push("/")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const register = async (data: {
-    name: string
-    email: string
-    password: string
-    semester?: string
-    major?: string
-  }) => {
+  const register = async (data: RegisterPayload, redirectTo = "/") => {
     setIsLoading(true)
     try {
       const res = await fetch("/api/auth/register", {
@@ -132,7 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.clear()
         window.dispatchEvent(new Event("scholaros_auth_changed"))
       }
-      router.push("/")
+      router.replace(redirectTo)
     } finally {
       setIsLoading(false)
     }
@@ -147,7 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.clear()
         window.dispatchEvent(new Event("scholaros_auth_changed"))
       }
-      router.push("/login")
+      router.replace("/login")
     } catch (err) {
       console.error("Logout error:", err)
     } finally {
@@ -161,7 +136,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         isLoading,
         login,
-        loginAsDemo,
         register,
         logout,
         refreshUser,
