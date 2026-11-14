@@ -6,13 +6,15 @@ import {
   getSessionCookieOptions,
   SESSION_COOKIE_NAME,
 } from "@/lib/auth"
+import { checkRateLimit, getClientIp } from "@/lib/security"
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req)
     const body = await req.json()
     const { email, password } = body
 
-    if (!email || !password) {
+    if (!email || !password || typeof email !== "string" || typeof password !== "string") {
       return NextResponse.json(
         { error: "Please provide both student email and password." },
         { status: 400 }
@@ -20,6 +22,18 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedEmail = email.toLowerCase().trim()
+
+    // Brute-force rate limit: max 12 login attempts per 15 min per IP + email
+    const rate = checkRateLimit(`login:${ip}:${normalizedEmail}`, 12, 15 * 60 * 1000)
+    if (!rate.allowed) {
+      return NextResponse.json(
+        {
+          error: `Too many login attempts. Please wait ${rate.retryAfterSeconds}s before trying again.`,
+        },
+        { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } }
+      )
+    }
+
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     })
@@ -65,7 +79,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("POST /api/auth/login error:", error)
     return NextResponse.json(
-      { error: error.message || "Failed to process login." },
+      { error: "Failed to process login." },
       { status: 500 }
     )
   }

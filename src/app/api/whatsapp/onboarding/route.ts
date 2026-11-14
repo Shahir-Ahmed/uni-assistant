@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getWhatsAppSessionSnapshot, startWhatsAppSession } from "@/lib/whatsapp-manager"
+import { checkRateLimit, getClientIp } from "@/lib/security"
 
 function isValidOnboardingId(id: string | null): id is string {
   return Boolean(id && /^[a-zA-Z0-9_-]{8,64}$/.test(id))
 }
 
 export async function GET(req: NextRequest) {
+  const ip = getClientIp(req)
+  const rate = checkRateLimit(`wa_onboard_get:${ip}`, 120, 5 * 60 * 1000)
+  if (!rate.allowed) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded for onboarding status polling." },
+      { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } }
+    )
+  }
+
   const { searchParams } = new URL(req.url)
   const onboardingId = searchParams.get("onboardingId")
 
@@ -19,6 +29,15 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req)
+    const rate = checkRateLimit(`wa_onboard_post:${ip}`, 20, 5 * 60 * 1000)
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: `Too many WhatsApp pairing requests. Please retry in ${rate.retryAfterSeconds}s.` },
+        { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } }
+      )
+    }
+
     const body = await req.json()
     const { onboardingId, mode = "QR", phoneNumber = "", forceFresh = false } = body
 

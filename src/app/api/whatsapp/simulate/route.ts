@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
 import { ensureGuestUser } from "@/lib/guest-user"
-import { extractFromWhatsApp, syncWhatsAppExtractionToDb, SIMULATION_SCENARIOS } from "@/lib/whatsapp-extractor"
+import {
+  extractFromWhatsApp,
+  syncWhatsAppExtractionToDb,
+  SIMULATION_SCENARIOS,
+} from "@/lib/whatsapp-extractor"
 
-export async function GET() {
-  return NextResponse.json({
-    scenarios: SIMULATION_SCENARIOS,
-  })
+export async function GET(req: NextRequest) {
+  try {
+    await ensureGuestUser(req)
+    return NextResponse.json({
+      scenarios: SIMULATION_SCENARIOS,
+    })
+  } catch (err: any) {
+    const status = err?.message?.includes("Unauthorized") ? 401 : 500
+    return NextResponse.json({ error: err.message || "Unauthorized" }, { status })
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -15,7 +25,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const { scenarioId, autoCommit = true } = body
 
-    const scenario = SIMULATION_SCENARIOS.find((s) => s.id === scenarioId) || SIMULATION_SCENARIOS[0]
+    const scenario =
+      SIMULATION_SCENARIOS.find((s) => s.id === scenarioId) || SIMULATION_SCENARIOS[0]
 
     const studentSubjects = await prisma.subject.findMany({
       where: { userId, isArchived: false },
@@ -31,7 +42,8 @@ export async function POST(req: NextRequest) {
         extraction,
         scenario.text,
         scenario.groupName,
-        scenario.sender
+        scenario.sender,
+        { waMessageKey: `sim_${scenario.id}_${Date.now()}` }
       )
     }
 
@@ -39,11 +51,12 @@ export async function POST(req: NextRequest) {
       success: true,
       scenario,
       extraction,
-      synced: !!syncResult,
+      synced: Boolean(syncResult && !syncResult.skipped),
       syncResult,
     })
   } catch (err: any) {
     console.error("POST /api/whatsapp/simulate error:", err)
-    return NextResponse.json({ error: err.message || "Simulation failed" }, { status: 500 })
+    const status = err?.message?.includes("Unauthorized") ? 401 : 500
+    return NextResponse.json({ error: err.message || "Simulation failed" }, { status })
   }
 }

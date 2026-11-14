@@ -1,25 +1,52 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from "next/server"
+import { prisma } from "@/lib/db"
+import { getAuthenticatedUser } from "@/lib/auth"
+import { timingSafeEqualString } from "@/lib/security"
 
-// Vercel Cron handler for background reminders
-export async function GET(request: Request) {
+/**
+ * Cron / Reminder Dispatcher
+ * Protected: requires valid CRON_SECRET Bearer token OR an authenticated student session (scoped to their own reminders).
+ */
+export async function GET(req: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization')
-    // In production Vercel checks CRON_SECRET if configured
-    if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authHeader = req.headers.get("authorization") || ""
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : ""
+    const cronSecret = process.env.CRON_SECRET || ""
+
+    const isCronAuthorized = Boolean(
+      cronSecret && bearer && timingSafeEqualString(bearer, cronSecret)
+    )
+    const authUser = isCronAuthorized ? null : await getAuthenticatedUser(req)
+
+    if (!isCronAuthorized && !authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     const now = new Date()
+    const dueReminders = await prisma.reminder.findMany({
+      where: {
+        ...(authUser ? { userId: authUser.id } : {}),
+        status: "PENDING",
+        remindAt: { lte: now },
+      },
+      take: 50,
+    })
 
-    // Query due reminders that are still PENDING
-    // Idempotent processing ensures no duplicate sends
+    if (dueReminders.length > 0) {
+      await prisma.reminder.updateMany({
+        where: { id: { in: dueReminders.map((r) => r.id) } },
+        data: { status: "SENT", isSent: true, sentAt: now },
+      })
+    }
+
     return NextResponse.json({
-      status: 'success',
+      status: "success",
       processedAt: now.toISOString(),
-      message: 'Background reminder job executed successfully.',
-      dispatchedCount: 0,
+      message: "Reminder check completed securely.",
+      dispatchedCount: dueReminders.length,
     })
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error("GET /api/cron/reminders error:", error)
+    return NextResponse.json({ error: "Failed to process reminders" }, { status: 500 })
   }
 }

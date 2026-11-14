@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
 import { ensureGuestUser } from "@/lib/guest-user"
-import { extractFromWhatsApp, syncWhatsAppExtractionToDb, ExtractionResult } from "@/lib/whatsapp-extractor"
+import {
+  extractFromWhatsApp,
+  syncWhatsAppExtractionToDb,
+  ExtractionResult,
+} from "@/lib/whatsapp-extractor"
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,9 +22,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing message text or extraction data" }, { status: 400 })
     }
 
-    // 1. If extraction wasn't provided, run extraction first
     let extraction: ExtractionResult = clientExtraction
-    if (!extraction && text) {
+    if (!extraction && typeof text === "string") {
       const studentSubjects = await prisma.subject.findMany({
         where: { userId, isArchived: false },
         select: { id: true, name: true, code: true },
@@ -28,7 +31,6 @@ export async function POST(req: NextRequest) {
       extraction = await extractFromWhatsApp(text, groupName, studentSubjects)
     }
 
-    // Don't auto-commit pure chit-chat
     if (!extraction.isAcademic && extraction.classification === "CHIT_CHAT") {
       return NextResponse.json({
         skipped: true,
@@ -37,7 +39,6 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // 2. Commit to database
     const syncResult = await syncWhatsAppExtractionToDb(
       userId,
       extraction,
@@ -49,6 +50,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(syncResult)
   } catch (err: any) {
     console.error("POST /api/whatsapp/sync error:", err)
-    return NextResponse.json({ error: err.message || "Failed to sync WhatsApp academic item" }, { status: 500 })
+    const status = err?.message?.includes("Unauthorized") ? 401 : 500
+    return NextResponse.json(
+      { error: err.message || "Failed to sync WhatsApp academic item" },
+      { status }
+    )
   }
 }

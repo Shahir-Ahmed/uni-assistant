@@ -5,7 +5,8 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
-  useMultiFileAuthState as initMultiFileAuthState,
+  normalizeMessageContent,
+  proto,
   WASocket,
 } from "@whiskeysockets/baileys"
 import { Boom } from "@hapi/boom"
@@ -17,8 +18,11 @@ import {
   extractFromWhatsApp,
   syncWhatsAppExtractionToDb,
   WhatsAppGroupConfig,
+  WhatsAppGroupKind,
   WhatsAppSyncConfig,
 } from "@/lib/whatsapp-extractor"
+import { createEncryptedMultiFileAuthState } from "@/lib/wa-encrypted-auth"
+import { generateSecureToken } from "@/lib/security"
 
 export type WhatsAppConnectionPhase =
   | "IDLE"
@@ -32,7 +36,13 @@ export type WhatsAppConnectionPhase =
 export interface DiscoveredWhatsAppGroup {
   id: string
   subject: string
+  description?: string
   participantsCount: number
+  kind: WhatsAppGroupKind
+  isCommunity: boolean
+  isCommunityAnnounce: boolean
+  linkedParentId: string | null
+  linkedParentName: string | null
 }
 
 export interface WhatsAppSessionSnapshot {
@@ -46,9 +56,26 @@ export interface WhatsAppSessionSnapshot {
   connectedName: string | null
   waVersion: string | null
   groups: DiscoveredWhatsAppGroup[]
+  bufferedMessageCount: number
+  lastSyncSummary: {
+    scanned: number
+    imported: number
+    skippedDuplicates: number
+    syncedAt: string
+  } | null
   lastError: string | null
   qrGeneratedAt: number | null
   updatedAt: string
+}
+
+interface BufferedWaMessage {
+  keyId: string
+  remoteJid: string
+  senderName: string
+  text: string
+  attachmentName: string | null
+  attachmentMime: string | null
+  timestampMs: number
 }
 
 interface InternalSession {
@@ -60,10 +87,17 @@ interface InternalSession {
   requestedPairingPhone: string | null
   pairingCodeRequested: boolean
   isStopping: boolean
+  createdAt: number
+  lastActivityAt: number
+  bufferedMessages: BufferedWaMessage[]
   waiters: Array<() => void>
 }
 
 const SESSIONS_ROOT = path.join(os.tmpdir(), "scholaros-whatsapp-sessions")
+const ONBOARDING_TTL_MS = 12 * 60 * 1000 // 12 minutes max for unpromoted signup sessions
+const MAX_ACTIVE_ONBOARDING_SESSIONS = 15
+const MAX_BUFFERED_MESSAGES = 120
+const HISTORY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000 // last 14 days
 
 declare global {
   // eslint-disable-next-line no-var
@@ -101,6 +135,8 @@ function createEmptySnapshot(sessionKey: string): WhatsAppSessionSnapshot {
     connectedName: null,
     waVersion: null,
     groups: [],
+    bufferedMessageCount: 0,
+    lastSyncSummary: null,
     lastError: null,
     qrGeneratedAt: null,
     updatedAt: new Date().toISOString(),
@@ -108,6 +144,7 @@ function createEmptySnapshot(sessionKey: string): WhatsAppSessionSnapshot {
 }
 
 function notifyWaiters(session: InternalSession) {
+  session.lastActivityAt = Date.now()
   session.snapshot.updatedAt = new Date().toISOString()
   const list = [...session.waiters]
   session.waiters = []
@@ -120,17 +157,116 @@ function notifyWaiters(session: InternalSession) {
   }
 }
 
-function extractMessageText(msg: any): string {
-  if (!msg?.message) return ""
-  const m = msg.message
-  return (
-    m.conversation ||
-    m.extendedTextMessage?.text ||
-    m.imageMessage?.caption ||
-    m.videoMessage?.caption ||
-    m.documentMessage?.caption ||
-    ""
-  )
+/**
+ * Recursively unwraps Baileys message envelopes (ephemeral, viewOnce, edited, documentWithCaption, polls, media captions).
+ */
+function parseBaileysMessageContent(rawMsg: proto.IWebMessageInfo): {
+  text: string
+  attachmentName: string | null
+  attachmentMime: string | null
+} {
+  if (!rawMsg?.message) {
+    return { text: "", attachmentName: null, attachmentMime: null }
+  }
+
+  let content = normalizeMessageContent(rawMsg.message) || rawMsg.message
+
+  // Handle edited messages
+  if (content.editedMessage?.message) {
+    content = normalizeMessageContent(content.editedMessage.message) || content.editedMessage.message
+  }
+  if (content.protocolMessage?.editedMessage) {
+    content =
+      normalizeMessageContent(content.protocolMessage.editedMessage) ||
+      content.protocolMessage.editedMessage
+  }
+
+  let text = ""
+  let attachmentName: string | null = null
+  let attachmentMime: string | null = null
+
+  if (content.conversation) {
+    text = content.conversation
+  } else if (content.extendedTextMessage?.text) {
+    text = content.extendedTextMessage.text
+  } else if (content.imageMessage) {
+    text = content.imageMessage.caption || ""
+    attachmentMime = content.imageMessage.mimetype || "image/jpeg"
+    attachmentName = "WhatsApp Image"
+  } else if (content.videoMessage) {
+    text = content.videoMessage.caption || ""
+    attachmentMime = content.videoMessage.mimetype || "video/mp4"
+  } else if (content.documentMessage) {
+    attachmentName = content.documentMessage.fileName || content.documentMessage.title || "Academic Document"
+    attachmentMime = content.documentMessage.mimetype || "application/pdf"
+    const caption = content.documentMessage.caption || ""
+    text = caption
+      ? `${caption}\n[Shared Document: ${attachmentName}]`
+      : `Shared study document: ${attachmentName}`
+  } else if (content.pollCreationMessage || content.pollCreationMessageV3) {
+    const poll = content.pollCreationMessageV3 || content.pollCreationMessage
+    const opts = (poll?.options || []).map((o) => o.optionName).filter(Boolean).join(", ")
+    if (poll?.name) {
+      text = `Poll: ${poll.name}${opts ? ` (Options: ${opts})` : ""}`
+    }
+  }
+
+  return {
+    text: text.trim(),
+    attachmentName,
+    attachmentMime,
+  }
+}
+
+/**
+ * Fetches participating University Communities, Announcement Channels, Sub-Groups, and Study Groups.
+ */
+async function fetchParticipatingCommunitiesAndGroups(
+  sock: WASocket
+): Promise<DiscoveredWhatsAppGroup[]> {
+  const groupMap = await sock.groupFetchAllParticipating()
+  const rawGroups = Object.values(groupMap) as any[]
+
+  const parentNameMap = new Map<string, string>()
+  for (const g of rawGroups) {
+    if (g.id && g.subject) {
+      parentNameMap.set(g.id, g.subject)
+    }
+  }
+
+  const discovered: DiscoveredWhatsAppGroup[] = rawGroups.map((g) => {
+    const isCommunity = Boolean(g.isCommunity)
+    const isCommunityAnnounce = Boolean(g.isCommunityAnnounce)
+    const linkedParentId = g.linkedParent || null
+    const linkedParentName = linkedParentId ? parentNameMap.get(linkedParentId) || "University Community" : null
+
+    let kind: WhatsAppGroupKind = "GROUP"
+    if (isCommunity) kind = "COMMUNITY"
+    else if (isCommunityAnnounce) kind = "COMMUNITY_ANNOUNCEMENTS"
+    else if (linkedParentId) kind = "SUBGROUP"
+
+    return {
+      id: g.id,
+      subject: g.subject || "WhatsApp Group",
+      description: typeof g.desc === "string" ? g.desc.slice(0, 240) : undefined,
+      participantsCount: Array.isArray(g.participants) ? g.participants.length : g.size || 0,
+      kind,
+      isCommunity,
+      isCommunityAnnounce,
+      linkedParentId,
+      linkedParentName,
+    }
+  })
+
+  // Prioritize Communities & Community Announcements first, then sub-groups & regular groups
+  const orderWeight: Record<WhatsAppGroupKind, number> = {
+    COMMUNITY_ANNOUNCEMENTS: 0,
+    COMMUNITY: 1,
+    SUBGROUP: 2,
+    GROUP: 3,
+  }
+  discovered.sort((a, b) => orderWeight[a.kind] - orderWeight[b.kind])
+  return discovered
 }
 
 async function persistConnectedStateToDb(
@@ -142,30 +278,52 @@ async function persistConnectedStateToDb(
     const existing = await prisma.preference.findUnique({
       where: { userId_key: { userId, key: "whatsapp_config" } },
     })
-    const currentCfg =
-      (existing?.value as unknown as WhatsAppSyncConfig) || { ...DEFAULT_WHATSAPP_CONFIG }
+    const currentCfg: WhatsAppSyncConfig =
+      (existing?.value as unknown as WhatsAppSyncConfig) || {
+        ...DEFAULT_WHATSAPP_CONFIG,
+        webhookVerifyToken: generateSecureToken("scholaros_wa", 16),
+      }
 
-    // Merge discovered WhatsApp groups with existing tracked rules
+    // Preserve user's existing group autoSync preferences while updating real WhatsApp metadata
+    const existingById = new Map((currentCfg.groups || []).map((g) => [g.id, g]))
     const existingByName = new Map(
       (currentCfg.groups || []).map((g) => [g.name.toLowerCase(), g])
     )
     const palette = ["#2563EB", "#059669", "#D97706", "#7C3AED", "#0D9488", "#DC2626"]
-    const mergedGroups: WhatsAppGroupConfig[] = [...(currentCfg.groups || [])]
+    const mergedGroups: WhatsAppGroupConfig[] = []
+    const seenIds = new Set<string>()
 
     discoveredGroups.forEach((dg, idx) => {
-      if (!existingByName.has(dg.subject.toLowerCase())) {
-        const codeMatch = dg.subject.match(/\b([A-Z]{2,5}[-\s]?\d{3})\b/i)
-        mergedGroups.unshift({
-          id: dg.id,
-          name: dg.subject,
-          subjectCode: codeMatch ? codeMatch[1].toUpperCase().replace(/\s+/, "-") : "GENERAL",
-          autoSync: true,
-          messageCount: 0,
-          lastActive: "Connected via WhatsApp",
-          color: palette[idx % palette.length],
-        })
-      }
+      const prev = existingById.get(dg.id) || existingByName.get(dg.subject.toLowerCase())
+      const codeMatch = `${dg.subject} ${dg.description || ""}`.match(/\b([A-Z]{2,5}[-\s]?\d{3})\b/i)
+      const detectedCode = codeMatch ? codeMatch[1].toUpperCase().replace(/\s+/, "-") : "GENERAL"
+
+      seenIds.add(dg.id)
+      mergedGroups.push({
+        id: dg.id,
+        name: dg.subject,
+        subjectCode: prev?.subjectCode || detectedCode,
+        subjectId: prev?.subjectId,
+        autoSync: prev ? prev.autoSync : true,
+        messageCount: prev?.messageCount || 0,
+        lastActive: prev?.lastActive || "Synced via WhatsApp",
+        color: prev?.color || palette[idx % palette.length],
+        kind: dg.kind,
+        isCommunity: dg.isCommunity,
+        isCommunityAnnounce: dg.isCommunityAnnounce,
+        linkedParentId: dg.linkedParentId,
+        linkedParentName: dg.linkedParentName,
+        participantsCount: dg.participantsCount,
+        description: dg.description,
+      })
     })
+
+    // Keep user's custom manually-added groups as well
+    for (const oldGrp of currentCfg.groups || []) {
+      if (!seenIds.has(oldGrp.id) && !discoveredGroups.some((d) => d.subject.toLowerCase() === oldGrp.name.toLowerCase())) {
+        mergedGroups.push(oldGrp)
+      }
+    }
 
     const nextCfg: WhatsAppSyncConfig = {
       ...currentCfg,
@@ -173,8 +331,10 @@ async function persistConnectedStateToDb(
       permissionGranted: true,
       permissionGrantedAt: currentCfg.permissionGrantedAt || new Date().toISOString(),
       pairedPhone: phone || currentCfg.pairedPhone,
-      pairedAt: new Date().toISOString(),
-      groups: mergedGroups.slice(0, 30),
+      pairedAt: currentCfg.pairedAt || new Date().toISOString(),
+      lastSyncedAt: new Date().toISOString(),
+      webhookVerifyToken: currentCfg.webhookVerifyToken || generateSecureToken("scholaros_wa", 16),
+      groups: mergedGroups.slice(0, 60),
     }
 
     await prisma.preference.upsert({
@@ -207,12 +367,56 @@ async function persistDisconnectedStateToDb(userId: string) {
   }
 }
 
+function cleanupExpiredOnboardingSessions() {
+  const store = getSessionStore()
+  const now = Date.now()
+  for (const [key, sess] of store.entries()) {
+    if (
+      key.startsWith("onboard-") &&
+      !sess.userId &&
+      now - sess.lastActivityAt > ONBOARDING_TTL_MS
+    ) {
+      sess.isStopping = true
+      teardownSocket(sess)
+      fs.rmSync(sess.authDir, { recursive: true, force: true })
+      store.delete(key)
+    }
+  }
+}
+
 function getOrCreateInternalSession(sessionKey: string, userId: string | null = null): InternalSession {
+  cleanupExpiredOnboardingSessions()
+
   const store = getSessionStore()
   const safeKey = sanitizeKey(sessionKey)
   let session = store.get(safeKey)
 
   if (!session) {
+    // Cap unauthenticated onboarding sessions to protect RAM/sockets from DoS
+    if (safeKey.startsWith("onboard-")) {
+      const onboardingCount = Array.from(store.keys()).filter((k) => k.startsWith("onboard-")).length
+      if (onboardingCount >= MAX_ACTIVE_ONBOARDING_SESSIONS) {
+        // Evict oldest inactive onboarding session
+        let oldestKey: string | null = null
+        let oldestTime = Infinity
+        for (const [k, s] of store.entries()) {
+          if (k.startsWith("onboard-") && s.lastActivityAt < oldestTime) {
+            oldestTime = s.lastActivityAt
+            oldestKey = k
+          }
+        }
+        if (oldestKey) {
+          const evicted = store.get(oldestKey)
+          if (evicted) {
+            evicted.isStopping = true
+            teardownSocket(evicted)
+            fs.rmSync(evicted.authDir, { recursive: true, force: true })
+          }
+          store.delete(oldestKey)
+        }
+      }
+    }
+
     const authDir = path.join(SESSIONS_ROOT, safeKey)
     session = {
       sessionKey: safeKey,
@@ -223,11 +427,17 @@ function getOrCreateInternalSession(sessionKey: string, userId: string | null = 
       requestedPairingPhone: null,
       pairingCodeRequested: false,
       isStopping: false,
+      createdAt: Date.now(),
+      lastActivityAt: Date.now(),
+      bufferedMessages: [],
       waiters: [],
     }
     store.set(safeKey, session)
-  } else if (userId && !session.userId) {
-    session.userId = userId
+  } else {
+    session.lastActivityAt = Date.now()
+    if (userId && !session.userId) {
+      session.userId = userId
+    }
   }
 
   return session
@@ -241,16 +451,148 @@ function teardownSocket(session: InternalSession) {
     oldSock.ev.removeAllListeners("connection.update")
     oldSock.ev.removeAllListeners("creds.update")
     oldSock.ev.removeAllListeners("messages.upsert")
+    oldSock.ev.removeAllListeners("messaging-history.set")
     oldSock.end(undefined)
   } catch {
     // ignore socket teardown errors
   }
 }
 
-async function launchSocket(session: InternalSession) {
-  fs.mkdirSync(session.authDir, { recursive: true })
+/**
+ * Processes an incoming or buffered group/community message under strict student permissions & deduplication.
+ */
+async function processAcademicMessageForUser(
+  session: InternalSession,
+  msg: BufferedWaMessage
+): Promise<{ imported: boolean; skippedDuplicate: boolean }> {
+  if (!session.userId) return { imported: false, skippedDuplicate: false }
+  if (!msg.remoteJid.endsWith("@g.us")) {
+    // Privacy guard: only scan community & study groups, NEVER private 1-on-1 personal DMs
+    return { imported: false, skippedDuplicate: false }
+  }
 
-  // Close previous socket gracefully with listeners removed before creating new one
+  const pref = await prisma.preference.findUnique({
+    where: { userId_key: { userId: session.userId, key: "whatsapp_config" } },
+  })
+  const cfg = pref?.value as unknown as WhatsAppSyncConfig | undefined
+  if (!cfg || cfg.permissionGranted !== true) {
+    return { imported: false, skippedDuplicate: false }
+  }
+
+  // Resolve group & parent community metadata
+  let discovered = session.snapshot.groups.find((g) => g.id === msg.remoteJid)
+  if (!discovered && session.sock) {
+    try {
+      const meta: any = await session.sock.groupMetadata(msg.remoteJid)
+      const parentGroup = meta.linkedParent
+        ? session.snapshot.groups.find((g) => g.id === meta.linkedParent)
+        : undefined
+      discovered = {
+        id: msg.remoteJid,
+        subject: meta.subject || msg.remoteJid,
+        description: meta.desc,
+        participantsCount: Array.isArray(meta.participants) ? meta.participants.length : 0,
+        kind: meta.isCommunityAnnounce
+          ? "COMMUNITY_ANNOUNCEMENTS"
+          : meta.isCommunity
+          ? "COMMUNITY"
+          : meta.linkedParent
+          ? "SUBGROUP"
+          : "GROUP",
+        isCommunity: Boolean(meta.isCommunity),
+        isCommunityAnnounce: Boolean(meta.isCommunityAnnounce),
+        linkedParentId: meta.linkedParent || null,
+        linkedParentName: parentGroup?.subject || null,
+      }
+    } catch {
+      // fallback
+    }
+  }
+
+  const groupName = discovered?.subject || msg.remoteJid
+  const parentCommunityName = discovered?.linkedParentName || null
+
+  // Enforce per-group autoSync toggle if group exists in student's config
+  const configuredGroup = (cfg.groups || []).find(
+    (g) => g.id === msg.remoteJid || g.name.toLowerCase() === groupName.toLowerCase()
+  )
+  if (configuredGroup && configuredGroup.autoSync === false) {
+    return { imported: false, skippedDuplicate: false }
+  }
+
+  const subjects = await prisma.subject.findMany({
+    where: { userId: session.userId, isArchived: false },
+    select: { id: true, name: true, code: true },
+  })
+
+  const extraction = await extractFromWhatsApp(msg.text, groupName, subjects, {
+    communityName: parentCommunityName,
+    attachmentName: msg.attachmentName,
+    attachmentMime: msg.attachmentMime,
+  })
+
+  const syncResult = await syncWhatsAppExtractionToDb(
+    session.userId,
+    extraction,
+    msg.text,
+    groupName,
+    msg.senderName,
+    {
+      waMessageKey: msg.keyId || undefined,
+      groupId: msg.remoteJid,
+      respectConfigRules: true,
+      config: cfg,
+      attachmentName: msg.attachmentName,
+      attachmentMime: msg.attachmentMime,
+    }
+  )
+
+  return {
+    imported: Boolean(syncResult.success && !syncResult.skipped),
+    skippedDuplicate: Boolean((syncResult as any).duplicate),
+  }
+}
+
+async function runBufferedHistorySync(session: InternalSession) {
+  if (!session.userId || session.bufferedMessages.length === 0) {
+    return { scanned: 0, imported: 0, skippedDuplicates: 0, syncedAt: new Date().toISOString() }
+  }
+
+  let scanned = 0
+  let imported = 0
+  let skippedDuplicates = 0
+
+  // Process recent up to 40 buffered group messages chronologically (oldest first)
+  const batch = [...session.bufferedMessages]
+    .sort((a, b) => a.timestampMs - b.timestampMs)
+    .slice(-40)
+
+  for (const item of batch) {
+    scanned++
+    try {
+      const res = await processAcademicMessageForUser(session, item)
+      if (res.imported) imported++
+      else if (res.skippedDuplicate) skippedDuplicates++
+    } catch (err) {
+      console.warn("History sync item error:", err)
+    }
+  }
+
+  const summary = {
+    scanned,
+    imported,
+    skippedDuplicates,
+    syncedAt: new Date().toISOString(),
+  }
+  session.snapshot.lastSyncSummary = summary
+  notifyWaiters(session)
+  return summary
+}
+
+async function launchSocket(session: InternalSession) {
+  fs.mkdirSync(SESSIONS_ROOT, { recursive: true, mode: 0o700 })
+  fs.mkdirSync(session.authDir, { recursive: true, mode: 0o700 })
+
   teardownSocket(session)
 
   session.isStopping = false
@@ -259,7 +601,7 @@ async function launchSocket(session: InternalSession) {
   session.snapshot.lastError = null
   notifyWaiters(session)
 
-  const { state, saveCreds } = await initMultiFileAuthState(session.authDir)
+  const { state, saveCreds } = await createEncryptedMultiFileAuthState(session.authDir)
   const { version } = await fetchLatestBaileysVersion()
   session.snapshot.waVersion = version.join(".")
 
@@ -269,7 +611,7 @@ async function launchSocket(session: InternalSession) {
     logger: pino({ level: "silent" }),
     browser: Browsers.ubuntu("Chrome"),
     markOnlineOnConnect: false,
-    syncFullHistory: false,
+    syncFullHistory: true,
   })
 
   session.sock = sock
@@ -279,7 +621,7 @@ async function launchSocket(session: InternalSession) {
     try {
       await saveCreds()
     } catch (err) {
-      console.warn("Failed to save WhatsApp creds:", err)
+      console.warn("Failed to save encrypted WhatsApp creds:", err)
     }
   })
 
@@ -303,7 +645,6 @@ async function launchSocket(session: InternalSession) {
         session.snapshot.qrDataUrl = qrDataUrl
         session.snapshot.qrGeneratedAt = Date.now()
 
-        // If user requested Phone Pairing Code mode, request official pairing code right after Noise handshake
         if (
           session.requestedPairingPhone &&
           !session.pairingCodeRequested &&
@@ -347,22 +688,18 @@ async function launchSocket(session: InternalSession) {
       session.snapshot.pairingCode = null
       session.snapshot.lastError = null
 
-      // Fetch real participating groups from WhatsApp
       let discoveredGroups: DiscoveredWhatsAppGroup[] = []
       try {
-        const groupMap = await sock.groupFetchAllParticipating()
-        discoveredGroups = Object.values(groupMap).map((g: any) => ({
-          id: g.id,
-          subject: g.subject || "WhatsApp Group",
-          participantsCount: Array.isArray(g.participants) ? g.participants.length : 0,
-        }))
+        discoveredGroups = await fetchParticipatingCommunitiesAndGroups(sock)
         session.snapshot.groups = discoveredGroups
       } catch (grpErr) {
-        console.warn("Could not fetch participating WhatsApp groups:", grpErr)
+        console.warn("Could not fetch participating WhatsApp communities/groups:", grpErr)
       }
 
       if (session.userId) {
         await persistConnectedStateToDb(session.userId, formattedPhone, discoveredGroups)
+        // Process any recent group/community messages already buffered from initial handshake
+        await runBufferedHistorySync(session)
       }
       notifyWaiters(session)
     }
@@ -380,7 +717,6 @@ async function launchSocket(session: InternalSession) {
       const isRestartRequired = statusCode === DisconnectReason.restartRequired
 
       if (isRestartRequired) {
-        // Standard WhatsApp Multi-Device post-pairing stream restart (code 515)
         try {
           await launchSocket(session)
         } catch (err: any) {
@@ -394,6 +730,7 @@ async function launchSocket(session: InternalSession) {
       if (isLoggedOut) {
         fs.rmSync(session.authDir, { recursive: true, force: true })
         session.sock = null
+        session.bufferedMessages = []
         session.snapshot = {
           ...createEmptySnapshot(session.sessionKey),
           status: "DISCONNECTED",
@@ -405,7 +742,6 @@ async function launchSocket(session: InternalSession) {
         return
       }
 
-      // If already registered, try auto-reconnecting; if unpaired QR timed out, stop cleanly
       if (sock.authState.creds.registered) {
         setTimeout(() => {
           if (!session.isStopping) {
@@ -415,63 +751,101 @@ async function launchSocket(session: InternalSession) {
       } else {
         session.snapshot.status = "DISCONNECTED"
         session.snapshot.lastError =
-          (lastDisconnect?.error as Error)?.message || "QR / pairing session expired. Click Refresh to generate a new one."
+          (lastDisconnect?.error as Error)?.message ||
+          "QR / pairing session expired. Click Refresh to generate a new one."
         notifyWaiters(session)
       }
     }
   })
 
-  // 4. Real-time incoming group message extraction for authenticated student
-  sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (session.sock !== sock || type !== "notify" || !session.userId) return
+  // 4. Buffer recent history messages from Communities & Study Groups delivered on initial link
+  sock.ev.on("messaging-history.set", async ({ messages }) => {
+    if (session.sock !== sock || !Array.isArray(messages)) return
+    const cutoffMs = Date.now() - HISTORY_WINDOW_MS
 
     for (const msg of messages) {
       try {
-        if (!msg.message || msg.key.fromMe) continue
-        const remoteJid = msg.key.remoteJid || ""
-        const text = extractMessageText(msg).trim()
-        if (!text) continue
+        const remoteJid = msg.key?.remoteJid || ""
+        if (!remoteJid.endsWith("@g.us")) continue
 
-        // Check user's WhatsApp sync permissions
-        const pref = await prisma.preference.findUnique({
-          where: { userId_key: { userId: session.userId, key: "whatsapp_config" } },
+        const rawTs = Number(msg.messageTimestamp || 0)
+        const tsMs = rawTs > 1e12 ? rawTs : rawTs * 1000
+        if (tsMs && tsMs < cutoffMs) continue
+
+        const parsed = parseBaileysMessageContent(msg)
+        if (!parsed.text) continue
+
+        const keyId = msg.key?.id || `${remoteJid}_${tsMs}`
+        if (session.bufferedMessages.some((b) => b.keyId === keyId)) continue
+
+        session.bufferedMessages.push({
+          keyId,
+          remoteJid,
+          senderName: msg.pushName || msg.key?.participant?.split("@")[0] || "Community Member",
+          text: parsed.text,
+          attachmentName: parsed.attachmentName,
+          attachmentMime: parsed.attachmentMime,
+          timestampMs: tsMs || Date.now(),
         })
-        const cfg = pref?.value as unknown as WhatsAppSyncConfig | undefined
-        if (cfg && cfg.permissionGranted === false) continue
+      } catch {
+        // ignore malformed historical message
+      }
+    }
 
-        let groupName = "WhatsApp Direct"
-        if (remoteJid.endsWith("@g.us")) {
-          const cached = session.snapshot.groups.find((g) => g.id === remoteJid)
-          if (cached) {
-            groupName = cached.subject
-          } else {
-            try {
-              const meta = await sock.groupMetadata(remoteJid)
-              groupName = meta.subject || remoteJid
-            } catch {
-              groupName = remoteJid
-            }
-          }
+    if (session.bufferedMessages.length > MAX_BUFFERED_MESSAGES) {
+      session.bufferedMessages = session.bufferedMessages
+        .sort((a, b) => a.timestampMs - b.timestampMs)
+        .slice(-MAX_BUFFERED_MESSAGES)
+    }
+    session.snapshot.bufferedMessageCount = session.bufferedMessages.length
+
+    if (session.userId && session.snapshot.status === "CONNECTED") {
+      await runBufferedHistorySync(session)
+    }
+  })
+
+  // 5. Real-time incoming group & community message extraction
+  sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    if (session.sock !== sock) return
+
+    for (const msg of messages) {
+      try {
+        const remoteJid = msg.key?.remoteJid || ""
+        if (!remoteJid.endsWith("@g.us")) continue
+
+        const parsed = parseBaileysMessageContent(msg)
+        if (!parsed.text) continue
+
+        const rawTs = Number(msg.messageTimestamp || 0)
+        const tsMs = rawTs > 1e12 ? rawTs : rawTs ? rawTs * 1000 : Date.now()
+
+        const item: BufferedWaMessage = {
+          keyId: msg.key?.id || `${remoteJid}_${tsMs}`,
+          remoteJid,
+          senderName:
+            msg.pushName ||
+            (msg.key?.fromMe ? session.snapshot.connectedName || "Me" : msg.key?.participant?.split("@")[0]) ||
+            "Classmate",
+          text: parsed.text,
+          attachmentName: parsed.attachmentName,
+          attachmentMime: parsed.attachmentMime,
+          timestampMs: tsMs,
         }
 
-        const senderName = msg.pushName || msg.key.participant || remoteJid.split("@")[0] || "Classmate"
-        const subjects = await prisma.subject.findMany({
-          where: { userId: session.userId, isArchived: false },
-          select: { id: true, name: true, code: true },
-        })
+        if (!session.bufferedMessages.some((b) => b.keyId === item.keyId)) {
+          session.bufferedMessages.push(item)
+          if (session.bufferedMessages.length > MAX_BUFFERED_MESSAGES) {
+            session.bufferedMessages = session.bufferedMessages.slice(-MAX_BUFFERED_MESSAGES)
+          }
+          session.snapshot.bufferedMessageCount = session.bufferedMessages.length
+        }
 
-        const extraction = await extractFromWhatsApp(text, groupName, subjects)
-        if (extraction.isAcademic && extraction.classification !== "CHIT_CHAT") {
-          await syncWhatsAppExtractionToDb(
-            session.userId,
-            extraction,
-            text,
-            groupName,
-            senderName
-          )
+        // Only live 'notify' events trigger instant DB extraction (append history is synced cleanly via runBufferedHistorySync)
+        if (type === "notify" && session.userId) {
+          await processAcademicMessageForUser(session, item)
         }
       } catch (msgErr) {
-        console.warn("Error processing incoming WhatsApp message:", msgErr)
+        console.warn("Error processing incoming WhatsApp community/group message:", msgErr)
       }
     }
   })
@@ -525,15 +899,15 @@ export async function startWhatsAppSession(params: {
 
   const sanitizedPhone = phoneNumber.replace(/\D/g, "")
   if (mode === "CODE" && (sanitizedPhone.length < 8 || sanitizedPhone.length > 15)) {
-    throw new Error("Please enter a valid WhatsApp phone number with country code (8–15 digits, e.g. +923001234567).")
+    throw new Error(
+      "Please enter a valid WhatsApp phone number with country code (8-15 digits, e.g. +923001234567)."
+    )
   }
 
-  // If already connected and not forcing fresh, return live connected snapshot
   if (session.snapshot.status === "CONNECTED" && !forceFresh) {
     return { ...session.snapshot }
   }
 
-  // Reset unpaired auth directory when forcing fresh or switching pairing mode before registration
   const hasActiveSocket =
     Boolean(session.sock) &&
     session.snapshot.status !== "DISCONNECTED" &&
@@ -550,7 +924,6 @@ export async function startWhatsAppSession(params: {
       session.isStopping = true
       teardownSocket(session)
       if (forceFresh || mode === "CODE") {
-        // Fresh Noise pre-keys ensure pairing code requests are never rejected by stale handshake state
         fs.rmSync(session.authDir, { recursive: true, force: true })
       }
       session.snapshot = createEmptySnapshot(session.sessionKey)
@@ -564,12 +937,37 @@ export async function startWhatsAppSession(params: {
   return waitForHandshakeOutput(session, mode, 15000)
 }
 
-export function getWhatsAppSessionSnapshot(sessionKey: string, userId?: string | null): WhatsAppSessionSnapshot {
+/**
+ * Refreshes live University Communities & Sub-Groups from WhatsApp and extracts any buffered missed notices.
+ */
+export async function syncWhatsAppCommunitiesAndHistory(
+  sessionKey: string,
+  userId: string
+): Promise<WhatsAppSessionSnapshot> {
+  const session = getOrCreateInternalSession(sessionKey, userId)
+  if (!session.sock || session.snapshot.status !== "CONNECTED") {
+    throw new Error("WhatsApp session is not currently connected. Please link your device first.")
+  }
+
+  const discoveredGroups = await fetchParticipatingCommunitiesAndGroups(session.sock)
+  session.snapshot.groups = discoveredGroups
+  await persistConnectedStateToDb(userId, session.snapshot.phoneNumber || "", discoveredGroups)
+  await runBufferedHistorySync(session)
+  return { ...session.snapshot }
+}
+
+export function getWhatsAppSessionSnapshot(
+  sessionKey: string,
+  userId?: string | null
+): WhatsAppSessionSnapshot {
   const session = getOrCreateInternalSession(sessionKey, userId || null)
   return { ...session.snapshot }
 }
 
-export async function disconnectWhatsAppSession(sessionKey: string, logout = true): Promise<WhatsAppSessionSnapshot> {
+export async function disconnectWhatsAppSession(
+  sessionKey: string,
+  logout = true
+): Promise<WhatsAppSessionSnapshot> {
   const store = getSessionStore()
   const safeKey = sanitizeKey(sessionKey)
   const session = store.get(safeKey)
@@ -585,7 +983,7 @@ export async function disconnectWhatsAppSession(sessionKey: string, logout = tru
         await session.sock.logout()
       }
     } catch {
-      // ignore logout error if socket already closed
+      // ignore
     }
     teardownSocket(session)
   }
@@ -598,6 +996,7 @@ export async function disconnectWhatsAppSession(sessionKey: string, logout = tru
     await persistDisconnectedStateToDb(session.userId)
   }
 
+  session.bufferedMessages = []
   session.snapshot = {
     ...createEmptySnapshot(safeKey),
     status: "DISCONNECTED",
@@ -606,7 +1005,10 @@ export async function disconnectWhatsAppSession(sessionKey: string, logout = tru
   return { ...session.snapshot }
 }
 
-export async function promoteOnboardingWhatsAppSession(onboardingKey: string, userId: string): Promise<WhatsAppSessionSnapshot | null> {
+export async function promoteOnboardingWhatsAppSession(
+  onboardingKey: string,
+  userId: string
+): Promise<WhatsAppSessionSnapshot | null> {
   const store = getSessionStore()
   const safeOnboardKey = sanitizeKey(onboardingKey)
   const safeUserKey = sanitizeKey(`user-${userId}`)
@@ -627,6 +1029,7 @@ export async function promoteOnboardingWhatsAppSession(onboardingKey: string, us
       onboardSession.snapshot.phoneNumber || "",
       onboardSession.snapshot.groups
     )
+    await runBufferedHistorySync(onboardSession)
   }
 
   return { ...onboardSession.snapshot }

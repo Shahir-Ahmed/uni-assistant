@@ -61,7 +61,7 @@ import {
   ExtractionResult,
   DEFAULT_WHATSAPP_CONFIG,
   SIMULATION_SCENARIOS,
-} from "@/lib/whatsapp-extractor"
+} from "@/lib/whatsapp-shared"
 import { WhatsAppQRCode } from "@/components/whatsapp/WhatsAppQRCode"
 
 interface LiveMessageItem {
@@ -114,6 +114,23 @@ export default function WhatsAppIntegrationPage() {
   const [copiedWebhook, setCopiedWebhook] = React.useState(false)
   const [webhookUrl, setWebhookUrl] = React.useState("/api/whatsapp/webhook")
 
+  const [isSyncingCommunities, setIsSyncingCommunities] = React.useState(false)
+  const [showWebhookToken, setShowWebhookToken] = React.useState(false)
+  const [isRotatingToken, setIsRotatingToken] = React.useState(false)
+
+  const getAuthHeaders = React.useCallback((withJson = true): Record<string, string> => {
+    const headers: Record<string, string> = withJson ? { "Content-Type": "application/json" } : {}
+    if (typeof window !== "undefined") {
+      try {
+        const token = sessionStorage.getItem("scholaros_auth_token") || ""
+        if (token) headers.Authorization = `Bearer ${token}`
+      } catch {
+        // ignore
+      }
+    }
+    return headers
+  }, [])
+
   React.useEffect(() => {
     setWebhookUrl(`${window.location.origin}/api/whatsapp/webhook`)
   }, [])
@@ -123,6 +140,26 @@ export default function WhatsAppIntegrationPage() {
   const [newGroupName, setNewGroupName] = React.useState("")
   const [newGroupSubject, setNewGroupSubject] = React.useState("")
   const [groupInviteUrl, setGroupInviteUrl] = React.useState("")
+
+  const fetchConfig = React.useCallback(async () => {
+    try {
+      const res = await fetch("/api/whatsapp/config", {
+        credentials: "include",
+        headers: getAuthHeaders(false),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.config) {
+          setConfig(data.config)
+          if (data.config.pairedPhone) {
+            setPhoneInput(data.config.pairedPhone)
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to load WhatsApp config:", e)
+    }
+  }, [getAuthHeaders])
 
   const startLiveSession = React.useCallback(
     async (mode: "QR" | "CODE", forceFresh = false) => {
@@ -136,7 +173,8 @@ export default function WhatsAppIntegrationPage() {
       try {
         const res = await fetch("/api/whatsapp/session", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          headers: getAuthHeaders(true),
           body: JSON.stringify({
             action: forceFresh ? "refresh" : "start",
             mode,
@@ -172,14 +210,84 @@ export default function WhatsAppIntegrationPage() {
         setIsRequestingCode(false)
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [phoneInput]
+    [phoneInput, getAuthHeaders, fetchConfig]
   )
+
+  const handleSyncCommunities = async () => {
+    setIsSyncingCommunities(true)
+    try {
+      const res = await fetch("/api/whatsapp/session", {
+        method: "POST",
+        credentials: "include",
+        headers: getAuthHeaders(true),
+        body: JSON.stringify({ action: "sync" }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setStatusMessage(data.error || "Link WhatsApp first to sync live university communities.")
+        setTimeout(() => setStatusMessage(null), 4000)
+        return
+      }
+      await fetchConfig()
+      const list = await academicService.getAnnouncements()
+      const waItems = list
+        .filter((a) => (a.source || "").toLowerCase().includes("whatsapp"))
+        .map((a) => ({
+          id: a.id,
+          groupName: a.sourceGroup || "WhatsApp Study Group",
+          sender: (a.extractedData as any)?.sender || a.source || "WhatsApp Contact",
+          text: a.originalMessage,
+          timestamp: new Date(a.dateReceived || a.createdAt).toLocaleString(),
+          synced: Boolean(a.isProcessed),
+          extraction: (a.extractedData as unknown as ExtractionResult) || undefined,
+        }))
+      setLiveMessages(waItems)
+
+      const summary = data.session?.lastSyncSummary
+      setStatusMessage(
+        summary
+          ? `Synced ${data.session.groups?.length || 0} communities/groups — scanned ${summary.scanned} recent messages, imported ${summary.imported} new academic items.`
+          : `Refreshed ${data.session?.groups?.length || 0} connected WhatsApp communities & groups.`
+      )
+      setTimeout(() => setStatusMessage(null), 5000)
+    } catch (err: any) {
+      setStatusMessage(err?.message || "Failed to sync communities.")
+      setTimeout(() => setStatusMessage(null), 4000)
+    } finally {
+      setIsSyncingCommunities(false)
+    }
+  }
+
+  const handleRotateWebhookToken = async () => {
+    setIsRotatingToken(true)
+    try {
+      const res = await fetch("/api/whatsapp/config", {
+        method: "POST",
+        credentials: "include",
+        headers: getAuthHeaders(true),
+        body: JSON.stringify({ action: "regenerate_webhook_token" }),
+      })
+      const data = await res.json()
+      if (res.ok && data.config) {
+        setConfig(data.config)
+        setStatusMessage("Rotated private webhook verify token securely.")
+        setTimeout(() => setStatusMessage(null), 3500)
+      }
+    } catch (err) {
+      console.error("Failed to rotate webhook token:", err)
+    } finally {
+      setIsRotatingToken(false)
+    }
+  }
 
   const handleDisconnectSession = async () => {
     setIsLoading(true)
     try {
-      await fetch("/api/whatsapp/session", { method: "DELETE" })
+      await fetch("/api/whatsapp/session", {
+        method: "DELETE",
+        credentials: "include",
+        headers: getAuthHeaders(false),
+      })
       setQrDataUrl(null)
       setQrString(null)
       setPairingCode(null)
@@ -206,7 +314,10 @@ export default function WhatsAppIntegrationPage() {
 
     const poll = setInterval(async () => {
       try {
-        const res = await fetch("/api/whatsapp/session")
+        const res = await fetch("/api/whatsapp/session", {
+          credentials: "include",
+          headers: getAuthHeaders(false),
+        })
         if (!res.ok) return
         const data = await res.json()
         const sess = data.session
@@ -232,7 +343,7 @@ export default function WhatsAppIntegrationPage() {
     }, 2500)
 
     return () => clearInterval(poll)
-  }, [qrModalOpen, pairingStep, qrString])
+  }, [qrModalOpen, pairingStep, qrString, getAuthHeaders, fetchConfig])
 
   // Live QR Code Countdown Timer
   React.useEffect(() => {
@@ -250,6 +361,7 @@ export default function WhatsAppIntegrationPage() {
   }
 
   // Load config, subjects, and student's own WhatsApp announcements on mount
+
   React.useEffect(() => {
     fetchConfig()
     academicService.getSubjects().then((res) => setSubjects(res)).catch(console.error)
@@ -270,31 +382,15 @@ export default function WhatsAppIntegrationPage() {
         setLiveMessages(waItems)
       })
       .catch(console.error)
-  }, [])
-
-  const fetchConfig = async () => {
-    try {
-      const res = await fetch("/api/whatsapp/config")
-      if (res.ok) {
-        const data = await res.json()
-        if (data.config) {
-          setConfig(data.config)
-          if (data.config.pairedPhone) {
-            setPhoneInput(data.config.pairedPhone)
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to load WhatsApp config:", e)
-    }
-  }
+  }, [fetchConfig])
 
   const saveConfig = async (newConfig: WhatsAppSyncConfig) => {
     setConfig(newConfig)
     try {
       await fetch("/api/whatsapp/config", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: getAuthHeaders(true),
         body: JSON.stringify({ config: newConfig }),
       })
       setStatusMessage("WhatsApp automation settings updated successfully.")
@@ -310,7 +406,8 @@ export default function WhatsAppIntegrationPage() {
     try {
       const res = await fetch("/api/whatsapp/simulate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: getAuthHeaders(true),
         body: JSON.stringify({ scenarioId, autoCommit: true }),
       })
 
@@ -347,7 +444,6 @@ export default function WhatsAppIntegrationPage() {
     if (!transcriptText.trim()) return
     setIsAnalyzingTranscript(true)
     try {
-      // Split transcript by typical WhatsApp timestamps e.g. [11/12/26, 09:30 AM] or lines
       const lines = transcriptText
         .split(/\n(?=\[|\d{1,2}\/\d{1,2}|\d{1,2}:\d{2})/g)
         .map((l) => l.trim())
@@ -356,7 +452,8 @@ export default function WhatsAppIntegrationPage() {
 
       const res = await fetch("/api/whatsapp/extract", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: getAuthHeaders(true),
         body: JSON.stringify({
           groupName: transcriptGroupName,
           messages: lines.length > 0 ? lines : [transcriptText],
@@ -379,7 +476,8 @@ export default function WhatsAppIntegrationPage() {
     try {
       const res = await fetch("/api/whatsapp/sync", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: getAuthHeaders(true),
         body: JSON.stringify({
           text: item.rawMessage,
           groupName: transcriptGroupName,
@@ -389,7 +487,11 @@ export default function WhatsAppIntegrationPage() {
 
       const data = await res.json()
       if (data.success) {
-        setStatusMessage(`Organized: "${item.extraction.title}" committed to database!`)
+        setStatusMessage(
+          data.duplicate
+            ? `Skipped duplicate: "${item.extraction.title}" was already saved.`
+            : `Organized: "${item.extraction.title}" committed to database!`
+        )
         setTimeout(() => setStatusMessage(null), 3000)
       }
     } catch (e) {
@@ -437,20 +539,21 @@ export default function WhatsAppIntegrationPage() {
               className="bg-emerald-500 hover:bg-emerald-600 text-emerald-950 font-bold shadow-md gap-2 h-11 px-5 rounded-xl transition-all"
             >
               <QrCode className="h-4 w-4" />
-              <span>Link WhatsApp Session</span>
+              <span>{config.status === "CONNECTED" ? "Device Paired" : "Link WhatsApp Session"}</span>
             </Button>
             <Button
               variant="outline"
-              onClick={() => setActiveTab("live")}
+              disabled={isSyncingCommunities}
+              onClick={handleSyncCommunities}
               className="bg-white/10 hover:bg-white/20 border-white/30 text-white font-medium h-11 px-4 rounded-xl gap-2"
             >
-              <Radio className="h-4 w-4 text-emerald-300" />
-              <span>Live Group Feed</span>
+              <RefreshCw className={`h-4 w-4 text-emerald-300 ${isSyncingCommunities ? "animate-spin" : ""}`} />
+              <span>{isSyncingCommunities ? "Syncing..." : "Sync Communities"}</span>
             </Button>
           </div>
         </div>
 
-        {/* Stats Strip */}
+        {/* Live Stats Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-6 border-t border-emerald-800/60 text-xs">
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center shrink-0">
@@ -458,7 +561,7 @@ export default function WhatsAppIntegrationPage() {
             </div>
             <div>
               <div className="text-lg font-bold text-white">{config.groups.length} Groups</div>
-              <div className="text-emerald-200/70 text-[11px]">Actively Tracked</div>
+              <div className="text-emerald-200/70 text-[11px]">Communities &amp; Circles</div>
             </div>
           </div>
 
@@ -467,7 +570,9 @@ export default function WhatsAppIntegrationPage() {
               <Calendar className="h-4 w-4" />
             </div>
             <div>
-              <div className="text-lg font-bold text-white">4 Quizzes</div>
+              <div className="text-lg font-bold text-white">
+                {liveMessages.filter((m) => m.extraction?.classification === "QUIZ" || m.extraction?.classification === "EXAM").length} Quizzes &amp; Exams
+              </div>
               <div className="text-emerald-200/70 text-[11px]">Auto-Scheduled</div>
             </div>
           </div>
@@ -477,7 +582,9 @@ export default function WhatsAppIntegrationPage() {
               <CheckSquare className="h-4 w-4" />
             </div>
             <div>
-              <div className="text-lg font-bold text-white">7 Tasks</div>
+              <div className="text-lg font-bold text-white">
+                {liveMessages.filter((m) => m.extraction?.classification === "ASSIGNMENT").length} Assignments
+              </div>
               <div className="text-emerald-200/70 text-[11px]">Deadlines Filed</div>
             </div>
           </div>
@@ -487,8 +594,10 @@ export default function WhatsAppIntegrationPage() {
               <FileText className="h-4 w-4" />
             </div>
             <div>
-              <div className="text-lg font-bold text-white">5 Cheatsheets</div>
-              <div className="text-emerald-200/70 text-[11px]">Study Notes Generated</div>
+              <div className="text-lg font-bold text-white">
+                {liveMessages.filter((m) => m.extraction?.classification === "NOTE").length} Study Notes
+              </div>
+              <div className="text-emerald-200/70 text-[11px]">Guides Extracted</div>
             </div>
           </div>
         </div>
@@ -979,72 +1088,108 @@ export default function WhatsAppIntegrationPage() {
                   ScholarOS monitors these WhatsApp groups and automatically classifies items into their respective academic subjects.
                 </CardDescription>
               </div>
-              <Button
-                size="sm"
-                onClick={() => setAddGroupModalOpen(true)}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold gap-1.5"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Track New Group</span>
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isSyncingCommunities}
+                  onClick={handleSyncCommunities}
+                  className="text-xs font-semibold gap-1.5"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isSyncingCommunities ? "animate-spin" : ""}`} />
+                  <span>Sync Live Communities</span>
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setAddGroupModalOpen(true)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold gap-1.5"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Track New Group</span>
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="divide-y divide-border">
-                {config.groups.map((group) => (
-                  <div key={group.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="h-10 w-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-xs"
-                        style={{ backgroundColor: group.color || "#059669" }}
-                      >
-                        {group.name.slice(0, 2).toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                          <span>{group.name}</span>
-                          <Badge variant="outline" className="text-[10px] font-bold border-primary/40 text-primary">
-                            {group.subjectCode || "GENERAL"}
-                          </Badge>
+                {config.groups.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-muted-foreground space-y-2">
+                    <p className="font-semibold text-foreground">No WhatsApp communities or study groups linked yet.</p>
+                    <p>Scan your WhatsApp QR code to automatically discover your university communities and sub-groups, or add one manually.</p>
+                  </div>
+                ) : (
+                  config.groups.map((group) => (
+                    <div key={group.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className="h-10 w-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-xs"
+                          style={{ backgroundColor: group.color || "#059669" }}
+                        >
+                          {group.name.slice(0, 2).toUpperCase()}
                         </div>
-                        <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
-                          <span>{group.messageCount} messages scanned</span>
-                          <span>•</span>
-                          <span>Last active {group.lastActive}</span>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 flex items-center gap-2 flex-wrap">
+                            <span className="truncate">{group.name}</span>
+                            <Badge variant="outline" className="text-[10px] font-bold border-primary/40 text-primary">
+                              {group.subjectCode || "GENERAL"}
+                            </Badge>
+                            {group.kind === "COMMUNITY" && (
+                              <Badge className="text-[10px] font-bold bg-teal-600 text-white">Community</Badge>
+                            )}
+                            {group.kind === "COMMUNITY_ANNOUNCEMENTS" && (
+                              <Badge className="text-[10px] font-bold bg-amber-600 text-white">Announcements</Badge>
+                            )}
+                            {group.kind === "SUBGROUP" && (
+                              <Badge variant="secondary" className="text-[10px] font-semibold">
+                                Sub-Group{group.linkedParentName ? `: ${group.linkedParentName}` : ""}
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3 flex-wrap">
+                            <span>{group.messageCount} academic items extracted</span>
+                            {group.participantsCount ? (
+                              <>
+                                <span>•</span>
+                                <span>{group.participantsCount} members</span>
+                              </>
+                            ) : null}
+                            <span>•</span>
+                            <span>Last active {group.lastActive}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-4 shrink-0">
-                      <div className="flex items-center gap-2">
-                        <Label htmlFor={`sync-${group.id}`} className="text-xs text-muted-foreground font-medium">
-                          Auto-Sync
-                        </Label>
-                        <Switch
-                          id={`sync-${group.id}`}
-                          checked={group.autoSync}
-                          onCheckedChange={(checked) => {
-                            const updated = config.groups.map((g) =>
-                              g.id === group.id ? { ...g, autoSync: checked } : g
-                            )
+                      <div className="flex items-center gap-4 shrink-0">
+                        <div className="flex items-center gap-2">
+                          <Label htmlFor={`sync-${group.id}`} className="text-xs text-muted-foreground font-medium">
+                            Auto-Sync
+                          </Label>
+                          <Switch
+                            id={`sync-${group.id}`}
+                            checked={group.autoSync}
+                            onCheckedChange={(checked) => {
+                              const updated = config.groups.map((g) =>
+                                g.id === group.id ? { ...g, autoSync: checked } : g
+                              )
+                              saveConfig({ ...config, groups: updated })
+                            }}
+                          />
+                        </div>
+
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            const updated = config.groups.filter((g) => g.id !== group.id)
                             saveConfig({ ...config, groups: updated })
                           }}
-                        />
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
-
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          const updated = config.groups.filter((g) => g.id !== group.id)
-                          saveConfig({ ...config, groups: updated })
-                        }}
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
@@ -1057,7 +1202,7 @@ export default function WhatsAppIntegrationPage() {
                 <span>Automated Extraction Rules</span>
               </CardTitle>
               <CardDescription className="text-xs">
-                Control how extracted data is handled when incoming messages are processed.
+                Strictly enforced on incoming community broadcasts and study group syncs.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1089,9 +1234,22 @@ export default function WhatsAppIntegrationPage() {
 
               <div className="flex items-center justify-between p-3.5 rounded-xl border bg-muted/20">
                 <div className="space-y-0.5">
+                  <div className="text-xs font-bold text-gray-900 dark:text-gray-100">Auto-Save Study Notes &amp; Lecture Materials</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Archive cheatsheets, formula guides, and shared slide notes from your groups into Study Notes.
+                  </div>
+                </div>
+                <Switch
+                  checked={config.autoSyncNotes}
+                  onCheckedChange={(v) => saveConfig({ ...config, autoSyncNotes: v })}
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3.5 rounded-xl border bg-muted/20">
+                <div className="space-y-0.5">
                   <div className="text-xs font-bold text-gray-900 dark:text-gray-100">Intelligent Chit-Chat Filter</div>
                   <div className="text-[11px] text-muted-foreground">
-                    Discard casual banter (&ldquo;lol&rdquo;, &ldquo;thx&rdquo;, memes, stickers) so your dashboard stays 100% academic.
+                    Discard casual banter (&ldquo;lol&rdquo;, &ldquo;thx&rdquo;, memes, stickers) and ignore personal 1-on-1 DMs.
                   </div>
                 </div>
                 <Switch
@@ -1116,7 +1274,7 @@ export default function WhatsAppIntegrationPage() {
                   <span>Meta WhatsApp Cloud API Webhook</span>
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  Configure this webhook URL in the Meta Developer Portal or your WhatsApp Business Platform app.
+                  Authenticated with cryptographic token verification and optional X-Hub-Signature-256 HMAC validation.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -1144,14 +1302,52 @@ export default function WhatsAppIntegrationPage() {
                 </div>
 
                 <div>
-                  <Label className="text-xs font-semibold">Verify Token</Label>
-                  <Input
-                    readOnly
-                    value={config.webhookVerifyToken}
-                    className="font-mono text-xs bg-muted/50 mt-1"
-                  />
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold">Private Verify Token</Label>
+                    <button
+                      type="button"
+                      onClick={() => setShowWebhookToken((prev) => !prev)}
+                      className="text-[11px] font-semibold text-primary hover:underline"
+                    >
+                      {showWebhookToken ? "Hide Token" : "Reveal Token"}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Input
+                      readOnly
+                      type={showWebhookToken ? "text" : "password"}
+                      value={config.webhookVerifyToken || ""}
+                      className="font-mono text-xs bg-muted/50"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!config.webhookVerifyToken}
+                      onClick={() => {
+                        if (config.webhookVerifyToken) {
+                          navigator.clipboard.writeText(config.webhookVerifyToken)
+                          setStatusMessage("Copied private webhook token to clipboard.")
+                          setTimeout(() => setStatusMessage(null), 2000)
+                        }
+                      }}
+                      className="text-xs shrink-0"
+                      title="Copy verify token"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isRotatingToken}
+                      onClick={handleRotateWebhookToken}
+                      className="text-xs shrink-0"
+                      title="Rotate webhook secret token"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${isRotatingToken ? "animate-spin" : ""}`} />
+                    </Button>
+                  </div>
                   <p className="text-[11px] text-muted-foreground mt-1">
-                    Enter this verify token in Meta WhatsApp Cloud API Webhook subscription settings.
+                    Unique 256-bit secret scoped only to your student account. Rotate anytime if exposed.
                   </p>
                 </div>
 

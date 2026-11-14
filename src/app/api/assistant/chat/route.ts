@@ -7,6 +7,7 @@ import { QuizQuestion } from "@/types"
 
 export async function POST(req: NextRequest) {
   try {
+    const userId = await ensureGuestUser(req)
     const body = await req.json()
     const { message, history = [], attachment = null } = body
 
@@ -18,7 +19,6 @@ export async function POST(req: NextRequest) {
     // 1. Gather live academic context from PostgreSQL database
     let academicContext = ""
     try {
-      const userId = await ensureGuestUser(req)
       const [subjects, assignments, events, resources] = await Promise.all([
         prisma.subject.findMany({
           where: { userId, isArchived: false },
@@ -202,9 +202,10 @@ OUTPUT STRUCTURE & FORMATTING RULES:
     })
   } catch (error: any) {
     console.error("POST /api/assistant/chat error:", error)
+    const status = error?.message?.includes("Unauthorized") ? 401 : 500
     return NextResponse.json(
       { error: error.message || "Failed to process chat message" },
-      { status: 500 }
+      { status }
     )
   }
 }

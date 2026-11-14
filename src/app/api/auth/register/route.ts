@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import crypto from "crypto"
 import { prisma } from "@/lib/db"
 import {
   hashPassword,
@@ -7,11 +6,21 @@ import {
   getSessionCookieOptions,
   SESSION_COOKIE_NAME,
 } from "@/lib/auth"
-import { DEFAULT_WHATSAPP_CONFIG, WhatsAppSyncConfig } from "@/lib/whatsapp-extractor"
+import { WhatsAppSyncConfig } from "@/lib/whatsapp-extractor"
 import { promoteOnboardingWhatsAppSession } from "@/lib/whatsapp-manager"
+import { checkRateLimit, generateSecureToken, getClientIp } from "@/lib/security"
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req)
+    const rate = checkRateLimit(`register:${ip}`, 8, 15 * 60 * 1000)
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: `Too many sign-up attempts. Please retry in ${rate.retryAfterSeconds}s.` },
+        { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } }
+      )
+    }
+
     const body = await req.json()
     const {
       name,
@@ -29,17 +38,17 @@ export async function POST(req: NextRequest) {
       filterChitChat = true,
     } = body
 
-    if (!name || typeof name !== "string" || name.trim().length < 2) {
-      return NextResponse.json({ error: "Please provide a valid full name." }, { status: 400 })
+    if (!name || typeof name !== "string" || name.trim().length < 2 || name.trim().length > 80) {
+      return NextResponse.json({ error: "Please provide a valid full name (2-80 characters)." }, { status: 400 })
     }
 
-    if (!email || typeof email !== "string" || !email.includes("@")) {
+    if (!email || typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       return NextResponse.json({ error: "Please enter a valid student email address." }, { status: 400 })
     }
 
-    if (!password || typeof password !== "string" || password.length < 6) {
+    if (!password || typeof password !== "string" || password.length < 6 || password.length > 128) {
       return NextResponse.json(
-        { error: "Password must be at least 6 characters long." },
+        { error: "Password must be between 6 and 128 characters long." },
         { status: 400 }
       )
     }
@@ -53,7 +62,6 @@ export async function POST(req: NextRequest) {
 
     const normalizedEmail = email.toLowerCase().trim()
 
-    // Check if user already exists
     const existing = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     })
@@ -65,10 +73,8 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Hash password with bcrypt
     const hashedPassword = await hashPassword(password)
 
-    // Create new student user record
     const user = await prisma.user.create({
       data: {
         name: name.trim(),
@@ -84,16 +90,17 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    // Initialize user's private WhatsApp integration config & permission
-    const trimmedPhone = typeof whatsappPhone === "string" ? whatsappPhone.trim() : ""
+    // Initialize student's private WhatsApp config with high-entropy CSPRNG webhook secret
+    const trimmedPhone = typeof whatsappPhone === "string" ? whatsappPhone.trim().slice(0, 32) : ""
     const isConnected = Boolean(whatsappPaired && trimmedPhone.length > 0)
-    const userVerifyToken = `scholaros_wa_${crypto.randomBytes(8).toString("hex")}`
+    const userVerifyToken = generateSecureToken("scholaros_wa", 16)
 
     const whatsappConfig: WhatsAppSyncConfig = {
       status: isConnected ? "CONNECTED" : "DISCONNECTED",
       permissionGranted: true,
       permissionGrantedAt: new Date().toISOString(),
       permissionScope: [
+        "read_university_communities",
         "read_study_groups",
         "extract_quizzes_assignments",
         "extract_lecture_notes",
@@ -106,10 +113,7 @@ export async function POST(req: NextRequest) {
       autoSyncNotes: Boolean(autoSyncNotes),
       filterChitChat: Boolean(filterChitChat),
       webhookVerifyToken: userVerifyToken,
-      groups: DEFAULT_WHATSAPP_CONFIG.groups.map((g) => ({
-        ...g,
-        id: `${g.id}-${user.id.slice(-4)}`,
-      })),
+      groups: [],
     }
 
     await prisma.preference.create({
@@ -121,7 +125,11 @@ export async function POST(req: NextRequest) {
     })
 
     // Promote live Baileys WhatsApp session if user paired during onboarding
-    if (onboardingSessionId && typeof onboardingSessionId === "string") {
+    if (
+      onboardingSessionId &&
+      typeof onboardingSessionId === "string" &&
+      /^[a-zA-Z0-9_-]{8,64}$/.test(onboardingSessionId)
+    ) {
       try {
         await promoteOnboardingWhatsAppSession(`onboard-${onboardingSessionId}`, user.id)
       } catch (promoErr) {
@@ -129,22 +137,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Store student profile metadata (semester, major) privately
+    const safeSemester = typeof semester === "string" ? semester.trim().slice(0, 40) : "Fall 2026"
+    const safeMajor = typeof major === "string" ? major.trim().slice(0, 60) : "Computer Science"
+
     await prisma.preference.create({
       data: {
         userId: user.id,
         key: "student_profile",
         value: {
-          semester,
-          major,
+          semester: safeSemester,
+          major: safeMajor,
           createdAt: new Date().toISOString(),
         },
       },
     })
 
-    // Initialize personal student environment with dedicated, isolated starter subjects
+    // Seed isolated starter courses
     try {
-      const term = semester || "Fall 2026"
       const subjects = [
         {
           name: "Data Structures & Algorithms",
@@ -179,7 +188,7 @@ export async function POST(req: NextRequest) {
             userId: user.id,
             name: s.name,
             code: s.code,
-            semester: term,
+            semester: safeSemester,
             academicYear: "2026-2027",
             instructor: s.instructor,
             description: s.description,
@@ -189,14 +198,14 @@ export async function POST(req: NextRequest) {
           },
         })
 
-        // Add one starter assignment to first subject
         if (i === 0) {
           await prisma.assignment.create({
             data: {
               userId: user.id,
               subjectId: createdSubject.id,
               title: "Assignment 1: Algorithm Complexity & Analysis",
-              description: "Analyze Big-O time and space complexity for recursive algorithms and submit proof report.",
+              description:
+                "Analyze Big-O time and space complexity for recursive algorithms and submit proof report.",
               priority: "HIGH",
               status: "NOT_STARTED",
               deadline: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
@@ -206,12 +215,11 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Add welcome announcement
       await prisma.announcement.create({
         data: {
           userId: user.id,
           title: `Welcome to your Private ScholarOS Space, ${user.name}!`,
-          originalMessage: `Your isolated university workspace (${major} • ${term}) and WhatsApp integration permissions are active. Quizzes, assignments, and study notes synced from your groups remain strictly private to your account.`,
+          originalMessage: `Your isolated university workspace (${safeMajor} - ${safeSemester}) and WhatsApp integration permissions are active. University community notices, quizzes, assignments, and study notes remain encrypted and private to your account.`,
           category: "GENERAL",
           source: "ScholarOS System",
           isProcessed: true,
@@ -221,7 +229,6 @@ export async function POST(req: NextRequest) {
       console.warn("Could not seed starter environment for new student:", seedErr)
     }
 
-    // Generate signed session token
     const token = createSessionToken({
       id: user.id,
       email: user.email!,
@@ -238,7 +245,6 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     )
 
-    // Set HTTP-only cookie with SameSite=None; Secure for HTTPS preview iframes
     response.cookies.set({
       name: SESSION_COOKIE_NAME,
       value: token,
@@ -249,7 +255,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("POST /api/auth/register error:", error)
     return NextResponse.json(
-      { error: error.message || "Failed to create student account." },
+      { error: "Failed to create student account." },
       { status: 500 }
     )
   }

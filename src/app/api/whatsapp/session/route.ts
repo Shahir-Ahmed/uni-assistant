@@ -4,6 +4,7 @@ import {
   disconnectWhatsAppSession,
   getWhatsAppSessionSnapshot,
   startWhatsAppSession,
+  syncWhatsAppCommunitiesAndHistory,
 } from "@/lib/whatsapp-manager"
 
 export async function GET(req: NextRequest) {
@@ -30,6 +31,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, session })
     }
 
+    if (action === "sync" || action === "refresh_groups") {
+      const session = await syncWhatsAppCommunitiesAndHistory(sessionKey, userId)
+      return NextResponse.json({ success: true, session })
+    }
+
     const session = await startWhatsAppSession({
       sessionKey,
       userId,
@@ -46,7 +52,7 @@ export async function POST(req: NextRequest) {
     console.error("POST /api/whatsapp/session error:", err)
     const status = err?.message?.includes("Unauthorized")
       ? 401
-      : err?.message?.includes("phone number")
+      : err?.message?.includes("phone number") || err?.message?.includes("not currently connected")
       ? 400
       : 500
     return NextResponse.json({ error: err.message || "WhatsApp connection failed" }, { status })

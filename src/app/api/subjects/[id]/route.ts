@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
-import { ensureGuestUser } from '@/lib/guest-user'
+import { NextRequest, NextResponse } from "next/server"
+import { prisma } from "@/lib/db"
+import { ensureGuestUser } from "@/lib/guest-user"
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -20,10 +20,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         },
       },
     })
-    if (!subject) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (!subject) return NextResponse.json({ error: "Not found" }, { status: 404 })
     return NextResponse.json(subject)
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    const status = error?.message?.includes("Unauthorized") ? 401 : 500
+    return NextResponse.json({ error: error.message }, { status })
   }
 }
 
@@ -33,25 +34,29 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const userId = await ensureGuestUser(req)
     const body = await req.json()
 
+    const updateData: Record<string, unknown> = {}
+    if (typeof body.name === "string") updateData.name = body.name.trim().slice(0, 120)
+    if (body.code !== undefined)
+      updateData.code = typeof body.code === "string" ? body.code.trim().slice(0, 32) : null
+    if (body.semester !== undefined) updateData.semester = body.semester
+    if (body.academicYear !== undefined) updateData.academicYear = body.academicYear
+    if (body.instructor !== undefined) updateData.instructor = body.instructor
+    if (body.description !== undefined) updateData.description = body.description
+    if (typeof body.color === "string" && /^#[0-9a-fA-F]{3,8}$/.test(body.color)) {
+      updateData.color = body.color
+    }
+    if (body.icon !== undefined) updateData.icon = body.icon
+    if (typeof body.isArchived === "boolean") updateData.isArchived = body.isArchived
+    if (Number.isFinite(Number(body.sortOrder))) updateData.sortOrder = Number(body.sortOrder)
+
     const subject = await prisma.subject.updateMany({
       where: { id, userId },
-      data: {
-        name: body.name,
-        code: body.code,
-        semester: body.semester,
-        academicYear: body.academicYear,
-        instructor: body.instructor,
-        description: body.description,
-        color: body.color,
-        icon: body.icon,
-        isArchived: body.isArchived,
-        sortOrder: body.sortOrder,
-      },
+      data: updateData,
     })
-    if (subject.count === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (subject.count === 0) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-    const updated = await prisma.subject.findUnique({
-      where: { id },
+    const updated = await prisma.subject.findFirst({
+      where: { id, userId },
       include: {
         _count: {
           select: {
@@ -66,10 +71,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     })
     return NextResponse.json(updated)
   } catch (error: any) {
-    if (error.code === 'P2002') {
-      return NextResponse.json({ error: 'A subject with this name already exists.' }, { status: 409 })
+    if (error.code === "P2002") {
+      return NextResponse.json({ error: "A subject with this name already exists." }, { status: 409 })
     }
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    const status = error?.message?.includes("Unauthorized") ? 401 : 500
+    return NextResponse.json({ error: error.message }, { status })
   }
 }
 
@@ -77,9 +83,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   try {
     const { id } = await params
     const userId = await ensureGuestUser(req)
-    await prisma.subject.deleteMany({ where: { id, userId } })
+    const deleted = await prisma.subject.deleteMany({ where: { id, userId } })
+    if (deleted.count === 0) return NextResponse.json({ error: "Not found" }, { status: 404 })
     return NextResponse.json({ success: true })
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    const status = error?.message?.includes("Unauthorized") ? 401 : 500
+    return NextResponse.json({ error: error.message }, { status })
   }
 }

@@ -74,7 +74,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       if (res.ok) {
         const data = await parseJsonSafe(res)
-        setUser(data.user || null)
+        if (data.user) {
+          setUser(data.user)
+        } else {
+          setUser(null)
+          try {
+            sessionStorage.removeItem(TOKEN_STORAGE_KEY)
+          } catch {
+            // ignore
+          }
+          if (
+            typeof window !== "undefined" &&
+            !window.location.pathname.startsWith("/signup") &&
+            !window.location.pathname.startsWith("/login")
+          ) {
+            router.replace("/signup")
+          }
+        }
       } else {
         setUser(null)
       }
@@ -84,7 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [router])
 
   React.useEffect(() => {
     refreshUser()
