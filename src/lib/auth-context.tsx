@@ -20,6 +20,7 @@ export interface RegisterPayload {
   whatsappPermissionGranted: boolean
   whatsappPhone?: string
   whatsappPaired?: boolean
+  onboardingSessionId?: string
   autoSyncAssignments?: boolean
   autoSyncQuizzes?: boolean
   autoSyncNotes?: boolean

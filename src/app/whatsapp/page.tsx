@@ -97,17 +97,26 @@ export default function WhatsAppIntegrationPage() {
   const [batchResults, setBatchResults] = React.useState<any[]>([])
   const [isAnalyzingTranscript, setIsAnalyzingTranscript] = React.useState(false)
 
-  // QR Pairing Modal & State
+  // QR Pairing Modal & Live Baileys Session State
   const [qrModalOpen, setQrModalOpen] = React.useState(false)
   const [pairingMode, setPairingMode] = React.useState<"QR" | "PHONE">("QR")
   const [pairingStep, setPairingStep] = React.useState<"SCAN" | "SUCCESS">("SCAN")
-  const [phoneInput, setPhoneInput] = React.useState("+1 (555) 482-9103")
-  const [pairingCode, setPairingCode] = React.useState("SCHL-9842")
+  const [phoneInput, setPhoneInput] = React.useState("")
+  const [pairingCode, setPairingCode] = React.useState<string | null>(null)
+  const [isRequestingCode, setIsRequestingCode] = React.useState(false)
   const [copiedCode, setCopiedCode] = React.useState(false)
-  const [sessionToken, setSessionToken] = React.useState("2@scholaros-live-session-2026-auth")
+  const [qrDataUrl, setQrDataUrl] = React.useState<string | null>(null)
+  const [qrString, setQrString] = React.useState<string | null>(null)
+  const [waVersion, setWaVersion] = React.useState<string | null>(null)
+  const [waSessionError, setWaSessionError] = React.useState<string | null>(null)
   const [qrCountdown, setQrCountdown] = React.useState(45)
   const [isRefreshingQr, setIsRefreshingQr] = React.useState(false)
   const [copiedWebhook, setCopiedWebhook] = React.useState(false)
+  const [webhookUrl, setWebhookUrl] = React.useState("/api/whatsapp/webhook")
+
+  React.useEffect(() => {
+    setWebhookUrl(`${window.location.origin}/api/whatsapp/webhook`)
+  }, [])
 
   // Add Group Modal State
   const [addGroupModalOpen, setAddGroupModalOpen] = React.useState(false)
@@ -115,30 +124,129 @@ export default function WhatsAppIntegrationPage() {
   const [newGroupSubject, setNewGroupSubject] = React.useState("")
   const [groupInviteUrl, setGroupInviteUrl] = React.useState("")
 
+  const startLiveSession = React.useCallback(
+    async (mode: "QR" | "CODE", forceFresh = false) => {
+      setWaSessionError(null)
+      if (mode === "QR") {
+        setIsRefreshingQr(true)
+      } else {
+        setIsRequestingCode(true)
+      }
+
+      try {
+        const res = await fetch("/api/whatsapp/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: forceFresh ? "refresh" : "start",
+            mode,
+            phoneNumber: phoneInput,
+            forceFresh,
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          setWaSessionError(data.error || "Unable to connect to WhatsApp servers.")
+          return
+        }
+
+        const sess = data.session
+        if (sess) {
+          if (sess.waVersion) setWaVersion(sess.waVersion)
+          if (sess.qrDataUrl) setQrDataUrl(sess.qrDataUrl)
+          if (sess.qrString) setQrString(sess.qrString)
+          if (sess.pairingCode) setPairingCode(sess.pairingCode)
+          if (sess.lastError) setWaSessionError(sess.lastError)
+          if (sess.qrGeneratedAt) setQrCountdown(45)
+
+          if (sess.status === "CONNECTED") {
+            setPairingStep("SUCCESS")
+            if (sess.phoneNumber) setPhoneInput(sess.phoneNumber)
+            await fetchConfig()
+          }
+        }
+      } catch (err: any) {
+        setWaSessionError(err?.message || "Failed to reach WhatsApp session service.")
+      } finally {
+        setIsRefreshingQr(false)
+        setIsRequestingCode(false)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [phoneInput]
+  )
+
+  const handleDisconnectSession = async () => {
+    setIsLoading(true)
+    try {
+      await fetch("/api/whatsapp/session", { method: "DELETE" })
+      setQrDataUrl(null)
+      setQrString(null)
+      setPairingCode(null)
+      await fetchConfig()
+      setStatusMessage("WhatsApp device session unlinked and cleared securely.")
+      setTimeout(() => setStatusMessage(null), 3500)
+    } catch (err) {
+      console.error("Failed to disconnect WhatsApp:", err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Start live QR handshake automatically when modal opens in QR mode
+  React.useEffect(() => {
+    if (qrModalOpen && pairingStep === "SCAN" && pairingMode === "QR" && !qrDataUrl) {
+      startLiveSession("QR", false)
+    }
+  }, [qrModalOpen, pairingStep, pairingMode, qrDataUrl, startLiveSession])
+
+  // Poll live Baileys session every 2.5s while pairing modal is open
+  React.useEffect(() => {
+    if (!qrModalOpen || pairingStep !== "SCAN") return
+
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch("/api/whatsapp/session")
+        if (!res.ok) return
+        const data = await res.json()
+        const sess = data.session
+        if (!sess) return
+
+        if (sess.qrDataUrl && sess.qrString !== qrString) {
+          setQrDataUrl(sess.qrDataUrl)
+          setQrString(sess.qrString)
+          setQrCountdown(45)
+        }
+        if (sess.waVersion) setWaVersion(sess.waVersion)
+        if (sess.pairingCode) setPairingCode(sess.pairingCode)
+        if (sess.lastError) setWaSessionError(sess.lastError)
+
+        if (sess.status === "CONNECTED") {
+          setPairingStep("SUCCESS")
+          if (sess.phoneNumber) setPhoneInput(sess.phoneNumber)
+          await fetchConfig()
+        }
+      } catch {
+        // ignore transient poll error
+      }
+    }, 2500)
+
+    return () => clearInterval(poll)
+  }, [qrModalOpen, pairingStep, qrString])
+
   // Live QR Code Countdown Timer
   React.useEffect(() => {
-    if (!qrModalOpen || pairingStep !== "SCAN" || pairingMode !== "QR") return
+    if (!qrModalOpen || pairingStep !== "SCAN" || pairingMode !== "QR" || !qrDataUrl) return
 
     const interval = setInterval(() => {
-      setQrCountdown((prev) => {
-        if (prev <= 1) {
-          setSessionToken(`2@scholaros-session-${Date.now()}`)
-          return 45
-        }
-        return prev - 1
-      })
+      setQrCountdown((prev) => (prev > 1 ? prev - 1 : 1))
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [qrModalOpen, pairingStep, pairingMode])
+  }, [qrModalOpen, pairingStep, pairingMode, qrDataUrl])
 
   const handleRefreshQr = () => {
-    setIsRefreshingQr(true)
-    setTimeout(() => {
-      setSessionToken(`2@scholaros-session-${Date.now()}`)
-      setQrCountdown(45)
-      setIsRefreshingQr(false)
-    }, 500)
+    startLiveSession("QR", true)
   }
 
   // Load config, subjects, and student's own WhatsApp announcements on mount
@@ -1017,15 +1125,14 @@ export default function WhatsAppIntegrationPage() {
                   <div className="flex items-center gap-2 mt-1">
                     <Input
                       readOnly
-                      value={typeof window !== "undefined" ? `${window.location.origin}/api/whatsapp/webhook` : "/api/whatsapp/webhook"}
+                      value={webhookUrl}
                       className="font-mono text-xs bg-muted/50"
                     />
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        const url = typeof window !== "undefined" ? `${window.location.origin}/api/whatsapp/webhook` : "/api/whatsapp/webhook"
-                        navigator.clipboard.writeText(url)
+                        navigator.clipboard.writeText(webhookUrl)
                         setCopiedWebhook(true)
                         setTimeout(() => setCopiedWebhook(false), 2000)
                       }}
@@ -1118,18 +1225,29 @@ export default function WhatsAppIntegrationPage() {
                   </Badge>
                 </div>
 
-                <div className="space-y-2 pt-2">
+                <div className="flex flex-col sm:flex-row gap-2 pt-2">
                   <Button
                     onClick={() => {
                       setPairingStep("SCAN")
+                      setQrDataUrl(null)
                       setQrModalOpen(true)
                     }}
                     variant="outline"
-                    className="w-full text-xs font-semibold gap-2 h-10"
+                    className="flex-1 text-xs font-semibold gap-2 h-10"
                   >
                     <QrCode className="h-4 w-4 text-emerald-600" />
-                    <span>{config.status === "CONNECTED" ? "Re-Scan QR Code for New Device" : "Scan QR Code to Pair Device"}</span>
+                    <span>{config.status === "CONNECTED" ? "Link Another / Re-Scan QR" : "Scan Official QR Code"}</span>
                   </Button>
+                  {config.status === "CONNECTED" && (
+                    <Button
+                      onClick={handleDisconnectSession}
+                      variant="outline"
+                      disabled={isLoading}
+                      className="text-xs font-semibold text-destructive border-destructive/40 hover:bg-destructive/10 h-10"
+                    >
+                      Unlink Device
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -1183,28 +1301,40 @@ export default function WhatsAppIntegrationPage() {
           {pairingStep === "SCAN" ? (
             pairingMode === "QR" ? (
               <div className="flex flex-col items-center justify-center p-4 space-y-4 text-center">
-                {/* Real SVG QR Code */}
+                {waSessionError && (
+                  <div className="w-full p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-300 text-[11px] text-amber-800 dark:text-amber-200 flex items-center gap-2 text-left">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    <span>{waSessionError}</span>
+                  </div>
+                )}
+
+                {/* Genuine WhatsApp Multi-Device QR Code */}
                 <div className="relative">
                   <WhatsAppQRCode
-                    sessionToken={sessionToken}
+                    qrDataUrl={qrDataUrl}
+                    qrString={qrString}
+                    waVersion={waVersion}
                     size={220}
                     isRefreshing={isRefreshingQr}
+                    error={waSessionError}
+                    onRefresh={handleRefreshQr}
                   />
 
-                  {/* Countdown Badge */}
-                  <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-md border border-gray-700 shrink-0 whitespace-nowrap">
-                    <Clock className="h-3 w-3 text-emerald-400" />
-                    <span>Code reloads in {qrCountdown}s</span>
-                    <button
-                      type="button"
-                      onClick={handleRefreshQr}
-                      disabled={isRefreshingQr}
-                      className="ml-1 text-emerald-400 hover:text-emerald-300"
-                      title="Refresh QR code"
-                    >
-                      <RefreshCw className={`h-2.5 w-2.5 ${isRefreshingQr ? "animate-spin" : ""}`} />
-                    </button>
-                  </div>
+                  {qrDataUrl && (
+                    <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-md border border-gray-700 shrink-0 whitespace-nowrap">
+                      <Clock className="h-3 w-3 text-emerald-400" />
+                      <span>QR valid ~{qrCountdown}s</span>
+                      <button
+                        type="button"
+                        onClick={handleRefreshQr}
+                        disabled={isRefreshingQr}
+                        className="ml-1 text-emerald-400 hover:text-emerald-300"
+                        title="Refresh QR code"
+                      >
+                        <RefreshCw className={`h-2.5 w-2.5 ${isRefreshingQr ? "animate-spin" : ""}`} />
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* 4 Clear Steps */}
@@ -1216,114 +1346,109 @@ export default function WhatsAppIntegrationPage() {
                     <li>Open <strong>WhatsApp</strong> on your mobile phone</li>
                     <li>Tap <strong>Menu ⋮</strong> (Android) or <strong>Settings ⚙️</strong> (iPhone)</li>
                     <li>Tap <strong>Linked Devices</strong> and select <strong>Link a Device</strong></li>
-                    <li>Point your camera at the QR code above to sync</li>
+                    <li>Point your camera at the authorized QR code above — ScholarOS will auto-connect</li>
                   </ol>
                 </div>
 
                 <div className="w-full flex items-center justify-between pt-1">
-                  <label className="text-[11px] text-muted-foreground flex items-center gap-2 cursor-pointer select-none">
-                    <input type="checkbox" defaultChecked className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" />
-                    <span>Keep me signed in on this computer</span>
-                  </label>
+                  <span className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1.5">
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                    <span>Listening for phone scan...</span>
+                  </span>
 
                   <Button
-                    onClick={() => {
-                      setPairingStep("SUCCESS")
-                      saveConfig({
-                        ...config,
-                        status: "CONNECTED",
-                        permissionGranted: true,
-                        permissionGrantedAt: config.permissionGrantedAt || new Date().toISOString(),
-                        pairedPhone: phoneInput,
-                        pairedAt: new Date().toISOString(),
-                      })
-                    }}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-9 px-4 gap-1.5"
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRefreshQr}
+                    disabled={isRefreshingQr}
+                    className="text-xs h-8 gap-1.5"
                   >
-                    <Check className="h-3.5 w-3.5" />
-                    <span>Pair Device Now</span>
+                    <RefreshCw className={`h-3 w-3 ${isRefreshingQr ? "animate-spin" : ""}`} />
+                    <span>New QR Code</span>
                   </Button>
                 </div>
               </div>
             ) : (
-              /* Phone Number & Pairing Code Mode */
+              /* Official Phone Number & Pairing Code Mode */
               <div className="p-4 space-y-4 text-xs">
+                {waSessionError && (
+                  <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-300 text-[11px] text-amber-800 dark:text-amber-200 flex items-center gap-2">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    <span>{waSessionError}</span>
+                  </div>
+                )}
+
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Enter your WhatsApp Phone Number</Label>
+                  <Label className="text-xs font-semibold">
+                    WhatsApp Phone Number (Include country code, e.g. +923001234567)
+                  </Label>
                   <div className="flex gap-2">
                     <Input
                       value={phoneInput}
                       onChange={(e) => setPhoneInput(e.target.value)}
-                      placeholder="+1 (555) 482-9103"
+                      placeholder="+923001234567"
                       className="text-xs h-9 font-mono"
                     />
                     <Button
+                      type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => setPairingCode(`SCHL-${Math.floor(1000 + Math.random() * 9000)}`)}
-                      className="text-xs shrink-0"
+                      disabled={isRequestingCode || !phoneInput.trim()}
+                      onClick={() => startLiveSession("CODE", true)}
+                      className="text-xs shrink-0 border-emerald-500/50 text-emerald-700 dark:text-emerald-300 font-semibold"
                     >
-                      Generate New Code
+                      {isRequestingCode ? "Connecting..." : "Get Official Code"}
                     </Button>
                   </div>
                 </div>
 
-                {/* Big Bold Code Boxes */}
-                <div className="p-4 rounded-xl border-2 border-emerald-500/40 bg-emerald-50/50 dark:bg-emerald-950/20 text-center space-y-2">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
-                    Your 8-Character WhatsApp Pairing Code
-                  </span>
+                {/* Big Bold Official Code Boxes */}
+                {pairingCode ? (
+                  <div className="p-4 rounded-xl border-2 border-emerald-500/40 bg-emerald-50/50 dark:bg-emerald-950/20 text-center space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                      Official 8-Character WhatsApp Pairing Code
+                    </span>
 
-                  <div className="flex items-center justify-center gap-1.5 py-1">
-                    {pairingCode.replace("-", "").split("").map((char, idx) => (
-                      <React.Fragment key={idx}>
-                        {idx === 4 && <span className="text-xl font-bold text-emerald-600 px-1">-</span>}
-                        <div className="h-10 w-9 rounded-lg bg-white dark:bg-card border-2 border-emerald-500 text-emerald-800 dark:text-emerald-200 font-mono font-extrabold text-lg flex items-center justify-center shadow-xs">
-                          {char}
-                        </div>
-                      </React.Fragment>
-                    ))}
-                  </div>
+                    <div className="flex items-center justify-center gap-1.5 py-1">
+                      {pairingCode.replace("-", "").split("").map((char, idx) => (
+                        <React.Fragment key={idx}>
+                          {idx === 4 && <span className="text-xl font-bold text-emerald-600 px-1">-</span>}
+                          <div className="h-10 w-9 rounded-lg bg-white dark:bg-card border-2 border-emerald-500 text-emerald-800 dark:text-emerald-200 font-mono font-extrabold text-lg flex items-center justify-center shadow-xs">
+                            {char}
+                          </div>
+                        </React.Fragment>
+                      ))}
+                    </div>
 
-                  <div className="flex items-center justify-center gap-2 pt-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        navigator.clipboard.writeText(pairingCode)
-                        setCopiedCode(true)
-                        setTimeout(() => setCopiedCode(false), 2000)
-                      }}
-                      className="h-7 text-xs font-semibold gap-1.5"
-                    >
-                      {copiedCode ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                      <span>{copiedCode ? "Copied to Clipboard!" : "Copy Code"}</span>
-                    </Button>
+                    <div className="flex items-center justify-center gap-2 pt-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(pairingCode)
+                          setCopiedCode(true)
+                          setTimeout(() => setCopiedCode(false), 2000)
+                        }}
+                        className="h-7 text-xs font-semibold gap-1.5"
+                      >
+                        {copiedCode ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                        <span>{copiedCode ? "Copied to Clipboard!" : "Copy Code"}</span>
+                      </Button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="p-4 rounded-xl border border-dashed border-border text-center text-[11px] text-muted-foreground">
+                    Enter your WhatsApp phone number with country code above and click{" "}
+                    <strong>Get Official Code</strong> to receive an authorized 8-character pairing code from WhatsApp.
+                  </div>
+                )}
 
                 <div className="space-y-1 text-[11px] text-muted-foreground leading-relaxed">
-                  <p>1. On your phone, tap WhatsApp notification: <strong>&ldquo;Enter code to link device&rdquo;</strong></p>
-                  <p>2. Type the 8-character code shown above and tap <strong>Confirm</strong></p>
+                  <p>1. Open WhatsApp &rarr; <strong>Linked Devices</strong> &rarr; <strong>Link a Device</strong> &rarr; <strong>Link with phone number instead</strong></p>
+                  <p>2. Enter the 8-character code above — this dialog updates automatically once linked</p>
                 </div>
-
-                <Button
-                  onClick={() => {
-                    setPairingStep("SUCCESS")
-                    saveConfig({
-                      ...config,
-                      status: "CONNECTED",
-                      permissionGranted: true,
-                      permissionGrantedAt: config.permissionGrantedAt || new Date().toISOString(),
-                      pairedPhone: phoneInput,
-                      pairedAt: new Date().toISOString(),
-                    })
-                  }}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-10 gap-2"
-                >
-                  <Check className="h-4 w-4" />
-                  <span>Verify &amp; Link Device Session</span>
-                </Button>
               </div>
             )
           ) : (
@@ -1344,11 +1469,10 @@ export default function WhatsAppIntegrationPage() {
                   <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
                   <span>Active Automated Group Monitoring:</span>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">
-                  <div>• CS-301 Operating Systems</div>
-                  <div>• CS-201 Algorithms Circle</div>
-                  <div>• CS-302 Database Systems</div>
-                  <div>• Class of 2026 Batch Group</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-muted-foreground">
+                  {config.groups.slice(0, 6).map((g) => (
+                    <div key={g.id} className="truncate">• {g.name}</div>
+                  ))}
                 </div>
               </div>
 

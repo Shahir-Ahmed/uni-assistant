@@ -1,5 +1,15 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  serverExternalPackages: [
+    '@whiskeysockets/baileys',
+    '@hapi/boom',
+    'ws',
+    'pino',
+    'pino-pretty',
+    'thread-stream',
+    'whatsapp-rust-bridge',
+    'libsignal',
+  ],
   images: {
     remotePatterns: [
       {

@@ -52,7 +52,7 @@ Suggested queries:
 * "When is my next quiz and what topics does it cover?"
 * "Explain CPU scheduling algorithms and turnaround metrics"
 * Attach lecture slides or PDF notes to extract key concepts and generate study guides.`,
-      timestamp: new Date(),
+      timestamp: new Date("2026-01-01T00:00:00.000Z"),
     },
   ])
 

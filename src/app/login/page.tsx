@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
 import {
   GraduationCap,
   ArrowRight,
@@ -19,11 +18,16 @@ import { Label } from "@/components/ui/label"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card"
 import { useAuth } from "@/lib/auth-context"
 
-function LoginPageInner() {
+export default function LoginPage() {
   const { login, isLoading } = useAuth()
-  const searchParams = useSearchParams()
-  const rawNext = searchParams.get("next")
-  const redirectTo = rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/"
+  const [redirectTo, setRedirectTo] = React.useState("/")
+
+  React.useEffect(() => {
+    const rawNext = new URLSearchParams(window.location.search).get("next")
+    if (rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//")) {
+      setRedirectTo(rawNext)
+    }
+  }, [])
 
   const [email, setEmail] = React.useState("")
   const [password, setPassword] = React.useState("")
@@ -182,19 +186,5 @@ function LoginPageInner() {
         </div>
       </div>
     </div>
-  )
-}
-
-export default function LoginPage() {
-  return (
-    <React.Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center bg-background text-xs text-muted-foreground">
-          Loading sign in...
-        </div>
-      }
-    >
-      <LoginPageInner />
-    </React.Suspense>
   )
 }

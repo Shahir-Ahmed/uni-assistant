@@ -2,9 +2,9 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
 import {
   GraduationCap,
+  ChevronDown,
   ArrowRight,
   ArrowLeft,
   Lock,
@@ -39,11 +39,10 @@ import {
 import { useAuth } from "@/lib/auth-context"
 import { WhatsAppQRCode } from "@/components/whatsapp/WhatsAppQRCode"
 
-function SignupPageInner() {
+export default function SignupPage() {
   const { register, isLoading } = useAuth()
-  const searchParams = useSearchParams()
-  const rawNext = searchParams.get("next")
-  const redirectTo = rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/"
+  const [redirectTo, setRedirectTo] = React.useState("/")
+  const [mounted, setMounted] = React.useState(false)
 
   // Multi-step onboarding state
   const [step, setStep] = React.useState<1 | 2>(1)
@@ -56,7 +55,7 @@ function SignupPageInner() {
   const [semester, setSemester] = React.useState("Fall 2026")
   const [major, setMajor] = React.useState("Computer Science")
 
-  // Step 2: WhatsApp Integration Permission & Pairing
+  // Step 2: WhatsApp Integration Permission & Real Baileys Pairing
   const [whatsappPermissionGranted, setWhatsappPermissionGranted] = React.useState(false)
   const [whatsappPhone, setWhatsappPhone] = React.useState("")
   const [linkMode, setLinkMode] = React.useState<"QR" | "CODE" | "LATER">("QR")
@@ -66,43 +65,127 @@ function SignupPageInner() {
   const [autoSyncNotes, setAutoSyncNotes] = React.useState(true)
   const [filterChitChat, setFilterChitChat] = React.useState(true)
 
-  // Live QR & Pairing Code state
-  const [sessionToken, setSessionToken] = React.useState("2@scholaros-onboarding-auth-2026")
+  // Live WhatsApp Handshake State
+  const [onboardingId, setOnboardingId] = React.useState("")
+  const [qrDataUrl, setQrDataUrl] = React.useState<string | null>(null)
+  const [qrString, setQrString] = React.useState<string | null>(null)
+  const [waVersion, setWaVersion] = React.useState<string | null>(null)
   const [qrCountdown, setQrCountdown] = React.useState(45)
   const [isRefreshingQr, setIsRefreshingQr] = React.useState(false)
-  const [pairingCode, setPairingCode] = React.useState("SCHL-4920")
+  const [pairingCode, setPairingCode] = React.useState<string | null>(null)
+  const [isRequestingCode, setIsRequestingCode] = React.useState(false)
+  const [waError, setWaError] = React.useState<string | null>(null)
+  const [connectedGroupCount, setConnectedGroupCount] = React.useState(0)
   const [copiedCode, setCopiedCode] = React.useState(false)
 
   const [error, setError] = React.useState<string | null>(null)
   const [submitting, setSubmitting] = React.useState(false)
 
   React.useEffect(() => {
-    setSessionToken(`2@scholaros-signup-${Date.now()}`)
-    setPairingCode(`SCHL-${Math.floor(1000 + Math.random() * 9000)}`)
+    setMounted(true)
+    const rawNext = new URLSearchParams(window.location.search).get("next")
+    if (rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//")) {
+      setRedirectTo(rawNext)
+    }
+    setOnboardingId(`onb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`)
   }, [])
 
-  React.useEffect(() => {
-    if (step !== 2 || linkMode !== "QR" || whatsappPaired) return
-    const timer = setInterval(() => {
-      setQrCountdown((prev) => {
-        if (prev <= 1) {
-          setSessionToken(`2@scholaros-signup-${Date.now()}`)
-          return 45
+  const startLiveWhatsApp = React.useCallback(
+    async (mode: "QR" | "CODE", forceFresh = false) => {
+      if (!onboardingId) return
+      setWaError(null)
+      if (mode === "QR") {
+        setIsRefreshingQr(true)
+      } else {
+        setIsRequestingCode(true)
+      }
+
+      try {
+        const res = await fetch("/api/whatsapp/onboarding", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            onboardingId,
+            mode,
+            phoneNumber: whatsappPhone,
+            forceFresh,
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          setWaError(data.error || "Unable to connect to WhatsApp servers.")
+          return
         }
-        return prev - 1
-      })
+
+        const sess = data.session
+        if (sess) {
+          if (sess.waVersion) setWaVersion(sess.waVersion)
+          if (sess.qrDataUrl) setQrDataUrl(sess.qrDataUrl)
+          if (sess.qrString) setQrString(sess.qrString)
+          if (sess.pairingCode) setPairingCode(sess.pairingCode)
+          if (sess.lastError) setWaError(sess.lastError)
+          if (sess.qrGeneratedAt) setQrCountdown(45)
+          if (sess.status === "CONNECTED") {
+            setWhatsappPaired(true)
+            if (sess.phoneNumber) setWhatsappPhone(sess.phoneNumber)
+            setConnectedGroupCount(Array.isArray(sess.groups) ? sess.groups.length : 0)
+          }
+        }
+      } catch (err: any) {
+        setWaError(err?.message || "Network error reaching WhatsApp handshake backend.")
+      } finally {
+        setIsRefreshingQr(false)
+        setIsRequestingCode(false)
+      }
+    },
+    [onboardingId, whatsappPhone]
+  )
+
+  // Automatically start WhatsApp QR handshake when entering Step 2
+  React.useEffect(() => {
+    if (step === 2 && linkMode === "QR" && !whatsappPaired && !qrDataUrl && onboardingId) {
+      startLiveWhatsApp("QR", false)
+    }
+  }, [step, linkMode, whatsappPaired, qrDataUrl, onboardingId, startLiveWhatsApp])
+
+  // Poll WhatsApp session status so scanning the QR or entering code auto-completes
+  React.useEffect(() => {
+    if (step !== 2 || linkMode === "LATER" || whatsappPaired || !onboardingId) return
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/whatsapp/onboarding?onboardingId=${encodeURIComponent(onboardingId)}`)
+        if (!res.ok) return
+        const data = await res.json()
+        const sess = data.session
+        if (!sess) return
+
+        if (sess.qrDataUrl && sess.qrString !== qrString) {
+          setQrDataUrl(sess.qrDataUrl)
+          setQrString(sess.qrString)
+          setQrCountdown(45)
+        }
+        if (sess.waVersion) setWaVersion(sess.waVersion)
+        if (sess.pairingCode) setPairingCode(sess.pairingCode)
+        if (sess.status === "CONNECTED") {
+          setWhatsappPaired(true)
+          if (sess.phoneNumber) setWhatsappPhone(sess.phoneNumber)
+          setConnectedGroupCount(Array.isArray(sess.groups) ? sess.groups.length : 0)
+        }
+      } catch {
+        // ignore transient poll error
+      }
+    }, 2500)
+    return () => clearInterval(poll)
+  }, [step, linkMode, whatsappPaired, onboardingId, qrString])
+
+  // Countdown tick for visual QR timer
+  React.useEffect(() => {
+    if (step !== 2 || linkMode !== "QR" || whatsappPaired || !qrDataUrl) return
+    const timer = setInterval(() => {
+      setQrCountdown((prev) => (prev > 1 ? prev - 1 : 1))
     }, 1000)
     return () => clearInterval(timer)
-  }, [step, linkMode, whatsappPaired])
-
-  const handleRefreshQr = () => {
-    setIsRefreshingQr(true)
-    setTimeout(() => {
-      setSessionToken(`2@scholaros-signup-${Date.now()}`)
-      setQrCountdown(45)
-      setIsRefreshingQr(false)
-    }, 450)
-  }
+  }, [step, linkMode, whatsappPaired, qrDataUrl])
 
   const handleContinueToStep2 = (e: React.FormEvent) => {
     e.preventDefault()
@@ -137,11 +220,6 @@ function SignupPageInner() {
       return
     }
 
-    if (linkMode !== "LATER" && whatsappPaired && !whatsappPhone.trim()) {
-      setError("Please enter your WhatsApp phone number to complete device linking.")
-      return
-    }
-
     setSubmitting(true)
     try {
       await register(
@@ -154,6 +232,7 @@ function SignupPageInner() {
           whatsappPermissionGranted: true,
           whatsappPhone: whatsappPhone.trim(),
           whatsappPaired: linkMode !== "LATER" && whatsappPaired,
+          onboardingSessionId: onboardingId,
           autoSyncAssignments,
           autoSyncQuizzes,
           autoSyncNotes,
@@ -239,7 +318,7 @@ function SignupPageInner() {
             <CardDescription className="text-xs text-muted-foreground">
               {step === 1
                 ? "New users must register first so every student has an isolated, encrypted workspace."
-                : "Grant WhatsApp sync permission to securely extract study group quizzes, deadlines, and notes into your private account."}
+                : "Authorize WhatsApp Multi-Device sync and scan the live WhatsApp QR or pairing code below."}
             </CardDescription>
           </CardHeader>
 
@@ -294,32 +373,54 @@ function SignupPageInner() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs font-semibold">Semester Term</Label>
-                    <Select value={semester} onValueChange={setSemester}>
-                      <SelectTrigger className="h-10 text-xs">
-                        <SelectValue placeholder="Select semester" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Fall 2026">Fall 2026</SelectItem>
-                        <SelectItem value="Spring 2027">Spring 2027</SelectItem>
-                        <SelectItem value="Summer 2027">Summer 2027</SelectItem>
-                        <SelectItem value="Fall 2027">Fall 2027</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {mounted ? (
+                      <Select value={semester} onValueChange={setSemester}>
+                        <SelectTrigger className="h-10 text-xs">
+                          <SelectValue placeholder="Select semester" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Fall 2026">Fall 2026</SelectItem>
+                          <SelectItem value="Spring 2027">Spring 2027</SelectItem>
+                          <SelectItem value="Summer 2027">Summer 2027</SelectItem>
+                          <SelectItem value="Fall 2027">Fall 2027</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-xs"
+                      >
+                        <span className="truncate">{semester}</span>
+                        <ChevronDown className="h-4 w-4 opacity-50" />
+                      </button>
+                    )}
                   </div>
 
                   <div className="space-y-1.5">
                     <Label className="text-xs font-semibold">Major / Program</Label>
-                    <Select value={major} onValueChange={setMajor}>
-                      <SelectTrigger className="h-10 text-xs">
-                        <SelectValue placeholder="Program" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Computer Science">Computer Science</SelectItem>
-                        <SelectItem value="Software Engineering">Software Eng.</SelectItem>
-                        <SelectItem value="Data Science & AI">Data Science &amp; AI</SelectItem>
-                        <SelectItem value="Information Systems">Info Systems</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {mounted ? (
+                      <Select value={major} onValueChange={setMajor}>
+                        <SelectTrigger className="h-10 text-xs">
+                          <SelectValue placeholder="Program" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Computer Science">Computer Science</SelectItem>
+                          <SelectItem value="Software Engineering">Software Eng.</SelectItem>
+                          <SelectItem value="Data Science & AI">Data Science &amp; AI</SelectItem>
+                          <SelectItem value="Information Systems">Info Systems</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-xs"
+                      >
+                        <span className="truncate">{major}</span>
+                        <ChevronDown className="h-4 w-4 opacity-50" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -383,27 +484,31 @@ function SignupPageInner() {
                       : "bg-amber-50/60 dark:bg-amber-950/20 border-amber-300"
                   }`}
                 >
-                  <label className="flex items-start gap-3 cursor-pointer select-none">
+                  <div className="flex items-start gap-3">
                     <input
+                      id="whatsappPermissionCheckbox"
                       type="checkbox"
                       checked={whatsappPermissionGranted}
                       onChange={(e) => setWhatsappPermissionGranted(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded border-emerald-500 text-emerald-600 focus:ring-emerald-500"
+                      className="mt-0.5 h-4 w-4 rounded border-emerald-500 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                     />
-                    <div className="space-y-1 text-xs">
-                      <div className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
+                    <label
+                      htmlFor="whatsappPermissionCheckbox"
+                      className="space-y-1 text-xs cursor-pointer select-none"
+                    >
+                      <span className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5 flex-wrap">
                         <span>Grant WhatsApp Integration Permission (Required)</span>
-                        <Badge variant="outline" className="text-[10px] border-emerald-500 text-emerald-700 dark:text-emerald-300">
+                        <span className="inline-flex items-center rounded-full border border-emerald-500 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
                           Private Access
-                        </Badge>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        </span>
+                      </span>
+                      <span className="block text-[11px] text-muted-foreground leading-relaxed">
                         I authorize ScholarOS to connect with my linked WhatsApp study groups and communities to
                         extract academic quizzes, assignments, and lecture notes strictly into my private space.
                         Personal messages and non-academic banter are discarded.
-                      </p>
-                    </div>
-                  </label>
+                      </span>
+                    </label>
+                  </div>
                 </div>
 
                 {/* Granular Sync Permissions */}
@@ -431,7 +536,7 @@ function SignupPageInner() {
                   </div>
                 </div>
 
-                {/* WhatsApp Device Pairing Selector */}
+                {/* Live WhatsApp Device Pairing Selector */}
                 <div className="space-y-3 rounded-xl border border-border p-3.5 bg-card">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <Label className="text-xs font-bold flex items-center gap-1.5">
@@ -443,7 +548,7 @@ function SignupPageInner() {
                         type="button"
                         onClick={() => {
                           setLinkMode("QR")
-                          setWhatsappPaired(false)
+                          setWaError(null)
                         }}
                         className={`px-2 py-1 text-[10px] font-bold rounded-md flex items-center gap-1 ${
                           linkMode === "QR" ? "bg-white dark:bg-card text-emerald-700 shadow-xs" : "text-muted-foreground"
@@ -456,7 +561,7 @@ function SignupPageInner() {
                         type="button"
                         onClick={() => {
                           setLinkMode("CODE")
-                          setWhatsappPaired(false)
+                          setWaError(null)
                         }}
                         className={`px-2 py-1 text-[10px] font-bold rounded-md flex items-center gap-1 ${
                           linkMode === "CODE" ? "bg-white dark:bg-card text-emerald-700 shadow-xs" : "text-muted-foreground"
@@ -469,7 +574,7 @@ function SignupPageInner() {
                         type="button"
                         onClick={() => {
                           setLinkMode("LATER")
-                          setWhatsappPaired(false)
+                          setWaError(null)
                         }}
                         className={`px-2 py-1 text-[10px] font-bold rounded-md ${
                           linkMode === "LATER" ? "bg-white dark:bg-card text-emerald-700 shadow-xs" : "text-muted-foreground"
@@ -480,132 +585,129 @@ function SignupPageInner() {
                     </div>
                   </div>
 
-                  {/* WhatsApp Number Input */}
-                  <div className="space-y-1">
-                    <Label htmlFor="waPhone" className="text-[11px] font-semibold text-muted-foreground">
-                      WhatsApp Phone Number {linkMode === "LATER" ? "(Optional)" : "(For private device verification)"}
-                    </Label>
-                    <Input
-                      id="waPhone"
-                      type="tel"
-                      value={whatsappPhone}
-                      onChange={(e) => setWhatsappPhone(e.target.value)}
-                      placeholder="+92 300 1234567 or +1 (555) 482-9103"
-                      className="h-9 text-xs font-mono"
-                    />
-                  </div>
-
-                  {linkMode === "QR" && (
-                    <div className="flex flex-col items-center space-y-3 pt-1">
-                      {whatsappPaired ? (
-                        <div className="w-full p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 flex items-center justify-between text-xs">
-                          <span className="font-bold text-emerald-800 dark:text-emerald-200 flex items-center gap-1.5">
-                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                            <span>WhatsApp Session Linked</span>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setWhatsappPaired(false)}
-                            className="text-[11px] text-emerald-700 underline"
-                          >
-                            Rescan
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="relative">
-                            <WhatsAppQRCode
-                              sessionToken={sessionToken}
-                              size={164}
-                              isRefreshing={isRefreshingQr}
-                            />
-                            <div className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm whitespace-nowrap">
-                              <Clock className="h-2.5 w-2.5 text-emerald-400" />
-                              <span>{qrCountdown}s</span>
-                              <button
-                                type="button"
-                                onClick={handleRefreshQr}
-                                disabled={isRefreshingQr}
-                                className="ml-1 text-emerald-400 hover:text-emerald-300"
-                                title="Refresh QR"
-                              >
-                                <RefreshCw className={`h-2.5 w-2.5 ${isRefreshingQr ? "animate-spin" : ""}`} />
-                              </button>
-                            </div>
-                          </div>
-                          <p className="text-[11px] text-muted-foreground text-center pt-1">
-                            WhatsApp &rarr; Linked Devices &rarr; Link a Device, then scan above.
-                          </p>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setWhatsappPaired(true)}
-                            className="h-8 text-xs font-semibold border-emerald-500/50 text-emerald-700 dark:text-emerald-300 gap-1.5"
-                          >
-                            <Check className="h-3.5 w-3.5" />
-                            <span>I&apos;ve Scanned the QR Code</span>
-                          </Button>
-                        </>
-                      )}
+                  {waError && (
+                    <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-300 text-[11px] text-amber-800 dark:text-amber-200 flex items-center gap-2">
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                      <span>{waError}</span>
                     </div>
                   )}
 
-                  {linkMode === "CODE" && (
-                    <div className="space-y-2.5 text-center">
-                      <div className="p-3 rounded-xl border border-emerald-500/40 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
-                          8-Character Pairing Code
-                        </span>
-                        <div className="flex items-center justify-center gap-1">
-                          {pairingCode
-                            .replace("-", "")
-                            .split("")
-                            .map((char, idx) => (
-                              <React.Fragment key={idx}>
-                                {idx === 4 && <span className="text-base font-bold text-emerald-600 px-0.5">-</span>}
-                                <div className="h-8 w-7 rounded-md bg-white dark:bg-card border border-emerald-500 text-emerald-800 dark:text-emerald-200 font-mono font-extrabold text-sm flex items-center justify-center">
-                                  {char}
-                                </div>
-                              </React.Fragment>
-                            ))}
-                        </div>
-                        <div className="flex items-center justify-center gap-2">
+                  {whatsappPaired ? (
+                    <div className="w-full p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-400 space-y-1 text-xs">
+                      <div className="font-bold text-emerald-800 dark:text-emerald-200 flex items-center gap-1.5">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        <span>WhatsApp Authorized &amp; Connected!</span>
+                      </div>
+                      <p className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                        Linked to {whatsappPhone || "your WhatsApp account"}
+                        {connectedGroupCount > 0 ? ` • Discovered ${connectedGroupCount} WhatsApp groups` : ""}.
+                      </p>
+                    </div>
+                  ) : linkMode === "QR" ? (
+                    <div className="flex flex-col items-center space-y-3 pt-1">
+                      <div className="relative">
+                        <WhatsAppQRCode
+                          qrDataUrl={qrDataUrl}
+                          qrString={qrString}
+                          waVersion={waVersion}
+                          size={180}
+                          isRefreshing={isRefreshingQr}
+                          error={waError}
+                          onRefresh={() => startLiveWhatsApp("QR", true)}
+                        />
+                        {qrDataUrl && (
+                          <div className="mt-2 flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
+                            <Clock className="h-3 w-3 text-emerald-600" />
+                            <span>QR expires in ~{qrCountdown}s</span>
+                            <button
+                              type="button"
+                              onClick={() => startLiveWhatsApp("QR", true)}
+                              disabled={isRefreshingQr}
+                              className="text-emerald-700 dark:text-emerald-300 font-semibold hover:underline flex items-center gap-1"
+                            >
+                              <RefreshCw className={`h-3 w-3 ${isRefreshingQr ? "animate-spin" : ""}`} />
+                              <span>Refresh</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground text-center">
+                        Open <strong>WhatsApp</strong> &rarr; <strong>Linked Devices</strong> &rarr;{" "}
+                        <strong>Link a Device</strong> and scan the live QR code above.
+                      </p>
+                    </div>
+                  ) : linkMode === "CODE" ? (
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="waPhone" className="text-[11px] font-semibold text-muted-foreground">
+                          WhatsApp Phone Number (Include country code, e.g. +923001234567)
+                        </Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="waPhone"
+                            type="tel"
+                            value={whatsappPhone}
+                            onChange={(e) => setWhatsappPhone(e.target.value)}
+                            placeholder="+923001234567"
+                            className="h-9 text-xs font-mono"
+                          />
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={() => {
-                              navigator.clipboard.writeText(pairingCode)
-                              setCopiedCode(true)
-                              setTimeout(() => setCopiedCode(false), 1800)
-                            }}
-                            className="h-7 text-[11px] gap-1"
+                            disabled={isRequestingCode || !whatsappPhone.trim()}
+                            onClick={() => startLiveWhatsApp("CODE", true)}
+                            className="h-9 text-xs font-semibold shrink-0 border-emerald-500/50 text-emerald-700 dark:text-emerald-300"
                           >
-                            {copiedCode ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                            <span>{copiedCode ? "Copied" : "Copy"}</span>
-                          </Button>
-                          <Button
-                            type="button"
-                            variant={whatsappPaired ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setWhatsappPaired(!whatsappPaired)}
-                            className={`h-7 text-[11px] gap-1 ${
-                              whatsappPaired ? "bg-emerald-600 text-white" : "border-emerald-500/50 text-emerald-700"
-                            }`}
-                          >
-                            <CheckCircle2 className="h-3 w-3" />
-                            <span>{whatsappPaired ? "Code Verified" : "Confirm Linked"}</span>
+                            {isRequestingCode ? "Requesting..." : "Get Official Code"}
                           </Button>
                         </div>
                       </div>
-                    </div>
-                  )}
 
-                  {linkMode === "LATER" && (
+                      {pairingCode && (
+                        <div className="p-3 rounded-xl border border-emerald-500/40 bg-emerald-50/40 dark:bg-emerald-950/20 text-center space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                            Official 8-Character WhatsApp Pairing Code
+                          </span>
+                          <div className="flex items-center justify-center gap-1">
+                            {pairingCode
+                              .replace("-", "")
+                              .split("")
+                              .map((char, idx) => (
+                                <React.Fragment key={idx}>
+                                  {idx === 4 && <span className="text-base font-bold text-emerald-600 px-0.5">-</span>}
+                                  <div className="h-8 w-7 rounded-md bg-white dark:bg-card border border-emerald-500 text-emerald-800 dark:text-emerald-200 font-mono font-extrabold text-sm flex items-center justify-center">
+                                    {char}
+                                  </div>
+                                </React.Fragment>
+                              ))}
+                          </div>
+                          <div className="flex items-center justify-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                navigator.clipboard.writeText(pairingCode)
+                                setCopiedCode(true)
+                                setTimeout(() => setCopiedCode(false), 1800)
+                              }}
+                              className="h-7 text-[11px] gap-1"
+                            >
+                              {copiedCode ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                              <span>{copiedCode ? "Copied" : "Copy Code"}</span>
+                            </Button>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground">
+                            Enter this code on your phone under WhatsApp &rarr; Linked Devices &rarr; Link with phone number.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
                     <p className="text-[11px] text-muted-foreground bg-muted/40 p-2.5 rounded-lg">
-                      Permission will be saved to your private profile now. You can scan the QR code anytime from the{" "}
-                      <strong>WhatsApp Sync</strong> tab inside your workspace.
+                      Permission will be saved to your private profile now. You can scan the live WhatsApp QR code
+                      anytime from the <strong>WhatsApp Sync</strong> tab inside your workspace.
                     </p>
                   )}
                 </div>
@@ -662,19 +764,5 @@ function SignupPageInner() {
         </div>
       </div>
     </div>
-  )
-}
-
-export default function SignupPage() {
-  return (
-    <React.Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center bg-background text-xs text-muted-foreground">
-          Loading registration...
-        </div>
-      }
-    >
-      <SignupPageInner />
-    </React.Suspense>
   )
 }

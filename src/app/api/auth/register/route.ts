@@ -3,6 +3,7 @@ import crypto from "crypto"
 import { prisma } from "@/lib/db"
 import { hashPassword, createSessionToken, SESSION_COOKIE_NAME } from "@/lib/auth"
 import { DEFAULT_WHATSAPP_CONFIG, WhatsAppSyncConfig } from "@/lib/whatsapp-extractor"
+import { promoteOnboardingWhatsAppSession } from "@/lib/whatsapp-manager"
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,6 +17,7 @@ export async function POST(req: NextRequest) {
       whatsappPermissionGranted,
       whatsappPhone = "",
       whatsappPaired = false,
+      onboardingSessionId = "",
       autoSyncAssignments = true,
       autoSyncQuizzes = true,
       autoSyncNotes = true,
@@ -112,6 +114,15 @@ export async function POST(req: NextRequest) {
         value: whatsappConfig as any,
       },
     })
+
+    // Promote live Baileys WhatsApp session if user paired during onboarding
+    if (onboardingSessionId && typeof onboardingSessionId === "string") {
+      try {
+        await promoteOnboardingWhatsAppSession(`onboard-${onboardingSessionId}`, user.id)
+      } catch (promoErr) {
+        console.warn("Could not promote onboarding WhatsApp session:", promoErr)
+      }
+    }
 
     // Store student profile metadata (semester, major) privately
     await prisma.preference.create({

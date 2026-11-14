@@ -6,6 +6,7 @@ const PUBLIC_PAGES = ["/signup", "/login"]
 const PUBLIC_API_PREFIXES = [
   "/api/auth/",
   "/api/whatsapp/webhook",
+  "/api/whatsapp/onboarding",
   "/api/cron/",
 ]
 
