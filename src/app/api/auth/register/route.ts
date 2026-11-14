@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
 import { prisma } from "@/lib/db"
-import { hashPassword, createSessionToken, SESSION_COOKIE_NAME } from "@/lib/auth"
+import {
+  hashPassword,
+  createSessionToken,
+  getSessionCookieOptions,
+  SESSION_COOKIE_NAME,
+} from "@/lib/auth"
 import { DEFAULT_WHATSAPP_CONFIG, WhatsAppSyncConfig } from "@/lib/whatsapp-extractor"
 import { promoteOnboardingWhatsAppSession } from "@/lib/whatsapp-manager"
 
@@ -226,21 +231,18 @@ export async function POST(req: NextRequest) {
     const response = NextResponse.json(
       {
         user,
+        token,
         whatsappConfig,
         message: "Private student account created with WhatsApp permission.",
       },
       { status: 201 }
     )
 
-    // Set secure HTTP-only cookie
+    // Set HTTP-only cookie with SameSite=None; Secure for HTTPS preview iframes
     response.cookies.set({
       name: SESSION_COOKIE_NAME,
       value: token,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: 30 * 24 * 60 * 60, // 30 days
+      ...getSessionCookieOptions(req, 30 * 24 * 60 * 60),
     })
 
     return response

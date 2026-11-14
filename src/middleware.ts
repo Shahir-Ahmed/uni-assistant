@@ -48,7 +48,9 @@ export function middleware(req: NextRequest) {
     return NextResponse.next()
   }
 
-  const sessionToken = req.cookies.get(SESSION_COOKIE_NAME)?.value
+  const bearerHeader = req.headers.get("authorization")
+  const bearerToken = bearerHeader?.startsWith("Bearer ") ? bearerHeader.slice(7).trim() : undefined
+  const sessionToken = req.cookies.get(SESSION_COOKIE_NAME)?.value || bearerToken
   const isAuthenticated = hasValidSessionTokenShape(sessionToken)
 
   // Allow public auth pages (/signup, /login)
@@ -69,7 +71,9 @@ export function middleware(req: NextRequest) {
 
   // Protect all workspace pages: require new users to sign up first
   if (!isAuthenticated) {
-    const signupUrl = new URL("/signup", req.url)
+    const signupUrl = req.nextUrl.clone()
+    signupUrl.pathname = "/signup"
+    signupUrl.search = ""
     if (pathname && pathname !== "/") {
       signupUrl.searchParams.set("next", pathname)
     }

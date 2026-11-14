@@ -78,6 +78,36 @@ export function verifySessionToken(token: string): SessionPayload | null {
   }
 }
 
+export function getSessionCookieOptions(
+  req?: Request | NextRequest | null,
+  maxAge = 30 * 24 * 60 * 60
+) {
+  let isHttps = process.env.NODE_ENV === "production"
+  if (req) {
+    const forwardedProto = req.headers.get("x-forwarded-proto") || ""
+    const origin = req.headers.get("origin") || ""
+    const referer = req.headers.get("referer") || ""
+    if (
+      forwardedProto.includes("https") ||
+      origin.startsWith("https://") ||
+      referer.startsWith("https://") ||
+      req.url.startsWith("https://")
+    ) {
+      isHttps = true
+    } else if (req.url.startsWith("http://localhost") || req.url.startsWith("http://127.0.0.1")) {
+      isHttps = false
+    }
+  }
+
+  return {
+    httpOnly: true,
+    secure: isHttps,
+    sameSite: (isHttps ? "none" : "lax") as "none" | "lax",
+    path: "/",
+    maxAge,
+  }
+}
+
 /**
  * Retrieve authenticated user from Request (via Cookie or Authorization header)
  */
@@ -90,23 +120,38 @@ export async function getAuthenticatedUser(req?: Request | NextRequest | null): 
   let token: string | null = null
 
   if (req) {
-    // 1. Check cookies
-    const cookieHeader = req.headers.get("cookie") || ""
-    const cookies = Object.fromEntries(
-      cookieHeader.split("; ").map((c) => {
-        const [k, ...v] = c.split("=")
-        return [k, v.join("=")]
-      })
-    )
-    if (cookies[SESSION_COOKIE_NAME]) {
-      token = cookies[SESSION_COOKIE_NAME]
+    // 1. Check NextRequest cookies helper first
+    const maybeCookies = (req as NextRequest).cookies
+    if (maybeCookies && typeof maybeCookies.get === "function") {
+      token = maybeCookies.get(SESSION_COOKIE_NAME)?.value || null
+    }
+
+    // Fallback to manual Cookie header parsing
+    if (!token) {
+      const cookieHeader = req.headers.get("cookie") || ""
+      for (const part of cookieHeader.split(";")) {
+        const trimmed = part.trim()
+        if (!trimmed) continue
+        const eqIdx = trimmed.indexOf("=")
+        if (eqIdx === -1) continue
+        const k = trimmed.slice(0, eqIdx).trim()
+        if (k === SESSION_COOKIE_NAME) {
+          const rawVal = trimmed.slice(eqIdx + 1).trim()
+          try {
+            token = decodeURIComponent(rawVal)
+          } catch {
+            token = rawVal
+          }
+          break
+        }
+      }
     }
 
     // 2. Check Authorization header
     if (!token) {
       const authHeader = req.headers.get("authorization")
       if (authHeader && authHeader.startsWith("Bearer ")) {
-        token = authHeader.substring(7)
+        token = authHeader.substring(7).trim()
       }
     }
   }

@@ -348,9 +348,23 @@ function apiUrl(path: string): string {
 }
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  let token = ''
+  if (typeof window !== 'undefined') {
+    try {
+      token = sessionStorage.getItem('scholaros_auth_token') || ''
+    } catch {
+      // ignore storage errors
+    }
+  }
+  const mergedHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...((options?.headers as Record<string, string>) || {}),
+  }
   const res = await fetch(apiUrl(path), {
-    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     ...options,
+    headers: mergedHeaders,
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))

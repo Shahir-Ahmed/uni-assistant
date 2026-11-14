@@ -38,6 +38,18 @@ interface AuthContextType {
 
 const AuthContext = React.createContext<AuthContextType | undefined>(undefined)
 
+const TOKEN_STORAGE_KEY = "scholaros_auth_token"
+
+async function parseJsonSafe(res: Response): Promise<any> {
+  const raw = await res.text()
+  if (!raw) return {}
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return { error: raw.slice(0, 200) }
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<UserProfile | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
@@ -45,10 +57,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshUser = React.useCallback(async () => {
     try {
-      const res = await fetch("/api/auth/me", { cache: "no-store" })
+      let savedToken = ""
+      try {
+        savedToken = sessionStorage.getItem(TOKEN_STORAGE_KEY) || ""
+      } catch {
+        // ignore storage restrictions
+      }
+      const headers: Record<string, string> = {}
+      if (savedToken) {
+        headers.Authorization = `Bearer ${savedToken}`
+      }
+      const res = await fetch("/api/auth/me", {
+        cache: "no-store",
+        credentials: "include",
+        headers,
+      })
       if (res.ok) {
-        const data = await res.json()
-        setUser(data.user)
+        const data = await parseJsonSafe(res)
+        setUser(data.user || null)
       } else {
         setUser(null)
       }
@@ -65,63 +91,78 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refreshUser])
 
   const login = async (email: string, password: string, redirectTo = "/") => {
-    setIsLoading(true)
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ email, password }),
       })
 
-      const data = await res.json()
+      const data = await parseJsonSafe(res)
       if (!res.ok) {
-        throw new Error(data.error || "Failed to sign in.")
+        throw new Error(data.error || "Failed to sign in. Please verify your credentials.")
+      }
+
+      try {
+        localStorage.clear()
+        if (data.token) {
+          sessionStorage.setItem(TOKEN_STORAGE_KEY, data.token)
+        }
+        window.dispatchEvent(new Event("scholaros_auth_changed"))
+      } catch {
+        // ignore storage errors in restricted iframes
       }
 
       setUser(data.user)
-      if (typeof window !== "undefined") {
-        localStorage.clear()
-        window.dispatchEvent(new Event("scholaros_auth_changed"))
-      }
       router.replace(redirectTo)
-    } finally {
-      setIsLoading(false)
+    } catch (err) {
+      throw err
     }
   }
 
   const register = async (data: RegisterPayload, redirectTo = "/") => {
-    setIsLoading(true)
     try {
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(data),
       })
 
-      const result = await res.json()
+      const result = await parseJsonSafe(res)
       if (!res.ok) {
         throw new Error(result.error || "Failed to create student account.")
       }
 
-      setUser(result.user)
-      if (typeof window !== "undefined") {
+      try {
         localStorage.clear()
+        if (result.token) {
+          sessionStorage.setItem(TOKEN_STORAGE_KEY, result.token)
+        }
         window.dispatchEvent(new Event("scholaros_auth_changed"))
+      } catch {
+        // ignore storage errors in restricted iframes
       }
+
+      setUser(result.user)
       router.replace(redirectTo)
-    } finally {
-      setIsLoading(false)
+    } catch (err) {
+      throw err
     }
   }
 
   const logout = async () => {
     setIsLoading(true)
     try {
-      await fetch("/api/auth/logout", { method: "POST" })
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" })
       setUser(null)
-      if (typeof window !== "undefined") {
+      try {
         localStorage.clear()
+        sessionStorage.removeItem(TOKEN_STORAGE_KEY)
         window.dispatchEvent(new Event("scholaros_auth_changed"))
+      } catch {
+        // ignore
       }
       router.replace("/login")
     } catch (err) {

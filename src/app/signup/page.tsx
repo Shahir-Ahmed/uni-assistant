@@ -143,10 +143,10 @@ export default function SignupPage() {
 
   // Automatically start WhatsApp QR handshake when entering Step 2
   React.useEffect(() => {
-    if (step === 2 && linkMode === "QR" && !whatsappPaired && !qrDataUrl && onboardingId) {
+    if (step === 2 && linkMode === "QR" && !whatsappPaired && !qrDataUrl && !waError && onboardingId) {
       startLiveWhatsApp("QR", false)
     }
-  }, [step, linkMode, whatsappPaired, qrDataUrl, onboardingId, startLiveWhatsApp])
+  }, [step, linkMode, whatsappPaired, qrDataUrl, waError, onboardingId, startLiveWhatsApp])
 
   // Poll WhatsApp session status so scanning the QR or entering code auto-completes
   React.useEffect(() => {
